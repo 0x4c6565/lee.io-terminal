@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "webpack": "^5.11.1",
+    "webpack-cli": "^4.3.1",
+    "xterm": "^4.9.0",
+    "xterm-addon-fit": "^0.4.0"
+  },
+  "devDependencies": {
+    "css-loader": "^5.0.1",
+    "style-loader": "^2.0.0",
+    "webpack-dev-server": "^3.11.1"
+  },
+  "scripts": {
+    "build": "webpack",
+    "start": "webpack serve"
+  }
+}

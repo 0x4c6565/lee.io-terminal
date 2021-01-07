@@ -140,50 +140,108 @@ function runTerminal() {
     term._initialized = true;
 
     var promptText = 'lee.io > ';
-    var promptLength = promptText.length;
 
-    term.prompt = () => {
-      term.write(`\r\n${promptText}`);
+    function prompt(prefix="\r\n", suffix="") {
+        term.write(`${prefix}${promptText}${suffix}`);
     };
+    
+    function clearAndPrompt(text) {
+        prompt("\r\x1B[K", text)
+    }
 
+    var history = []
+    var historyPos = 0
+    var historyLimit = 100;
+    var cursorX = 0;
     var inputBuffer = "";
 
     term.onData(e => {
         switch (e) {
             case '\r': // Enter
-                let inputBufferSplit = inputBuffer.split(' ')
-                let command = inputBufferSplit.shift();
-                
-                if (command !== "") {
-                    if (commandCollection.exists(command)) {
-                        commandCollection.get(command).func(inputBufferSplit);
-                    } else {
-                        term.write(`\r\n${command}: command not found`);
+                if (inputBuffer.length > 0) {
+                    if (history.length > historyLimit) {
+                        history.pop()
+                    }
+                    history.unshift(inputBuffer)
+                    
+                    let inputBufferSplit = inputBuffer.split(' ')
+                    let command = inputBufferSplit.shift();
+                    
+                    if (command !== "") {
+                        if (commandCollection.exists(command)) {
+                            commandCollection.get(command).func(inputBufferSplit);
+                        } else {
+                            term.write(`\r\n${command}: command not found`);
+                        }
                     }
                 }
-                inputBuffer = "";
-                term.prompt();
-                break;
             case '\u0003': // Ctrl+C
-                term.prompt();
+                inputBuffer = "";
+                cursorX = 0;
+                historyPos = 0
+                prompt();
                 break;
             case '\u007F': // Backspace
-                // Preserve prompt
-                if (term._core.buffer.x > promptLength) {
+                if (cursorX > 0) {
                     term.write('\b \b');
-                    inputBuffer = inputBuffer.substring(0,inputBuffer.length-1)
+                    inputBuffer = inputBuffer.substring(0, inputBuffer.length-1)
+                    cursorX--;
+                }
+                break;
+            case '\x1b[D': // Left arrow
+                if (cursorX > 0) {
+                    term.write(e);
+                    cursorX--;
+                }        
+                break;
+            case '\x1b[C': // Right arrow
+                if (cursorX < inputBuffer.length) {
+                    term.write(e);
+                    cursorX++;
+                }        
+                break;
+            case '\x1b[A': // Up arrow
+                if (history.length > 0) {
+                    if (historyPos < history.length) {                        
+                        historyPos++;
+                    }
+                    inputBuffer = history[historyPos-1]
+                    clearAndPrompt(inputBuffer)
+                    cursorX = inputBuffer.length
+                }
+                break;
+            case '\x1b[B': // Down arrow
+                if (history.length > 0 && historyPos > 0) {
+                    historyPos--;
+
+                    if (historyPos > 0) {
+                        inputBuffer = history[historyPos-1]
+                        clearAndPrompt(inputBuffer)
+                        cursorX = inputBuffer.length
+                    } else {
+                        cursorX = 0;
+                        inputBuffer = "";
+                        clearAndPrompt()
+                    }
                 }
                 break;
             default: // Add characters to buffer
                 if (/^[ \w\-\.]*$/.test(e)) {
-                    term.write(e);
-                    inputBuffer = inputBuffer + e;
+                    var cursorSuffix = inputBuffer.substr(cursorX);
+                    inputBuffer = inputBuffer.substr(0, cursorX) + e + cursorSuffix;
+                    var outputBuffer = inputBuffer
+                    if (cursorSuffix.length > 0) {
+                        outputBuffer += `\x1b[${cursorSuffix.length}D`
+                    }
+
+                    clearAndPrompt(outputBuffer)
+                    cursorX += e.length;
                 }
         }
     });
 
     term.write('Type \x1B[34mhelp\x1B[0m for help');
-    term.prompt();
+    prompt();
     term.focus();
 }
 

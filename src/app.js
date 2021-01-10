@@ -104,15 +104,20 @@ commandCollection.add("tool", new Command(function(args) {
             success: function(data) {
                 term.write("\r\n\r\n"+data.replace(/\n/g, "\r\n")+"\r\n");
             },
-            error: function(jqXHR, textStatus) {
-                term.write(`\r\nFailed with status '${jqXHR.status}': ${textStatus}`);
+            error: function(jqXHR) {
+                term.write(`\r\nFailed with status '${jqXHR.status}': ${jqXHR.responseText}`);
             },
             async: false
         });
     }
 
     var tools = [
-        "geoip"
+        "geoip",
+        "ssl",
+        "subnet",
+        "whois",
+        "mac",
+        "keypair"
     ]
 
     if (args.length < 1) {
@@ -129,7 +134,12 @@ commandCollection.add("tool", new Command(function(args) {
 
     executeTool(name, args)
 
-}, {summary: "Executes a tool. See man for more info", help: "GeoIP: Retreives GeoIP information for current (or specified IP/Host)"}))
+}, {summary: "Executes a tool. See man for more info", help: "geoip: Retrieves GeoIP information for source or provided address as first argument\r\n"+
+                                                             "ssl: Retrieves SSL informatio for host provided as first argument\r\n"+
+                                                             "subnet: Subnet calculator for provided IP with mask/cidr\r\n"+
+                                                             "whois: WHOIS information for host provided as first argument\r\n"+
+                                                             "mac: Lookup vendor for provided MAC address\r\n"+
+                                                             "keypair: Generates RSA keypair with optional comment (for dev only)"}))
 
 
 function runTerminal() {
@@ -226,17 +236,15 @@ function runTerminal() {
                 }
                 break;
             default: // Add characters to buffer
-                if (/^[ \w\-\.]*$/.test(e)) {
-                    var cursorSuffix = inputBuffer.substr(cursorX);
-                    inputBuffer = inputBuffer.substr(0, cursorX) + e + cursorSuffix;
-                    var outputBuffer = inputBuffer
-                    if (cursorSuffix.length > 0) {
-                        outputBuffer += `\x1b[${cursorSuffix.length}D`
-                    }
-
-                    clearAndPrompt(outputBuffer)
-                    cursorX += e.length;
+                var cursorSuffix = inputBuffer.substr(cursorX);
+                inputBuffer = inputBuffer.substr(0, cursorX) + e + cursorSuffix;
+                var outputBuffer = inputBuffer
+                if (cursorSuffix.length > 0) {
+                    outputBuffer += `\x1b[${cursorSuffix.length}D`
                 }
+
+                clearAndPrompt(outputBuffer)
+                cursorX += e.length;
         }
     });
 

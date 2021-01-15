@@ -16,12 +16,43 @@ term.loadAddon(fitAddon);
 fitAddon.fit();
 
 
-function Command(func, opts) {
+function Command(func) {
     this.func = func
-    this.opts = opts
 
-    this.getOptions = function() {
-        return this.opts
+    this.withFunc = function(func) {
+        this.func = func
+        return this
+    }
+
+    this.withSummary = function(summary) {
+        this.summary = summary
+        return this
+    }
+
+    this.withHelp = function(help) {
+        this.help = help
+        return this
+    }
+
+    this.withHidden = function() {
+        this.hidden = true
+        return this
+    }
+
+    this.getHelp = function() {
+        return this.help
+    }
+
+    this.getSummary = function() {
+        return this.summary
+    }
+
+    this.getHidden = function() {
+        return this.hidden
+    }
+
+    this.execute = function(args) {
+        return this.func(args)
     }
 }
 
@@ -47,99 +78,116 @@ var commandCollection = {
     }
 }
 
-commandCollection.add("about", new Command(function() {
-    term.write( "\r\nI r Lee Spottiswood. I do Dev(Ops) shit\r\n"+
-                "\r\nGithub: https://github.com/0x4c6565"+
-                "\r\nGitLab: https://gitlab.com/0x4c6565"+
-                "\r\nTwitter: https://twitter.com/leespottiswood");
-}, {summary: "Prints information about me", help: "Prints information about me"}))
+commandCollection.add("about", 
+    new Command(function() {
+        term.write( "\r\nI r Lee Spottiswood. I do Dev(Ops) shit\r\n"+
+                    "\r\nGithub: https://github.com/0x4c6565"+
+                    "\r\nGitLab: https://gitlab.com/0x4c6565"+
+                    "\r\nTwitter: https://twitter.com/leespottiswood");
+    })
+    .withSummary("Prints information about me")
+    .withHelp("Prints information about me")
+);
 
-commandCollection.add("tools", new Command(function() {
-    term.write( "\r\nHere be tools I've made");
-}, {summary: "Prints information about available tools", help: "Prints information about available tools"}))
+commandCollection.add("help", 
+    new Command(function() {
+        function getCommandNameMaxLength() {
+            var length = 10;
+            for (var commandName in commandCollection.getAll()) {
+                if (commandName.length > length) {
+                    length = commandName.length
+                }
+            }
+            return length
+        }
 
-commandCollection.add("help", new Command(function() {
-    function getCommandNameMaxLength() {
-        var length = 10;
+        term.write("\r\nCommands:\r\n");
+        var commandPadLength = getCommandNameMaxLength();
         for (var commandName in commandCollection.getAll()) {
-            if (commandName.length > length) {
-                length = commandName.length
+            var command = commandCollection.get(commandName);
+            if (!command.getHidden()) {
+                term.write(`\r\n${commandName.padEnd(commandPadLength, ' ')} : `+commandCollection.get(commandName).getSummary());
             }
         }
-        return length
-    }
 
-    term.write("\r\nCommands:\r\n");
-    var commandPadLength = getCommandNameMaxLength();
-    for (var commandName in commandCollection.getAll()) {
-        var command = commandCollection.get(commandName);
-        if (!command.getOptions().hidden) {
-            term.write(`\r\n${commandName.padEnd(commandPadLength, ' ')} : `+commandCollection.get(commandName).getOptions().summary);
+    })
+    .withSummary("Prints help page")
+    .withHelp("Prints help page")
+)
+
+commandCollection.add("man", 
+    new Command(function(args) {
+        if (!commandCollection.exists(args)) {
+            term.write(`\r\nNo manual entry for '${args}'`);
+            return;
         }
-    }
 
-}, {summary: "Prints help page", help: "Prints help page"}))
+        term.write('\r\n'+commandCollection.get(args).getHelp());
+    })
+    .withSummary("Shows man page for command")
+    .withHelp("no, u")
+)
 
-commandCollection.add("man", new Command(function(args) {
-    if (!commandCollection.exists(args)) {
-        term.write(`\r\nNo manual entry for '${args}'`);
-        return;
-    }
-
-    term.write('\r\n'+commandCollection.get(args).getOptions().help);
-}, {summary: "Shows man page for command", help: "no, u"}))
-
-commandCollection.add("clear", new Command(function() {
-    term.clear();
-}, {summary: "Clears the terminal", help: "Clears the terminal", hidden: true}))
+commandCollection.add("clear", 
+    new Command(function() {
+        term.clear();
+    })
+    .withSummary("Clears the terminal")
+    .withHelp("Clears the terminal")
+    .withHidden()
+)
 
 
-commandCollection.add("tool", new Command(function(args) {
-    function executeTool(name, args) {
-        var uri = (`https://lee.io/${name}/${args.join("/")}`).replace(/\/$/, "")
-    
-        $.ajax({
-            url: uri,
-            dataType: 'text',
-            success: function(data) {
-                term.write("\r\n\r\n"+data.replace(/\n/g, "\r\n")+"\r\n");
-            },
-            error: function(jqXHR) {
-                term.write(`\r\nFailed with status '${jqXHR.status}': ${jqXHR.responseText}`);
-            },
-            async: false
-        });
-    }
+commandCollection.add("tool", 
+    new Command(function(args) {
+        function executeTool(name, args) {
+            var uri = (`https://lee.io/${name}/${args.join("/")}`).replace(/\/$/, "")
+        
+            $.ajax({
+                url: uri,
+                dataType: 'text',
+                success: function(data) {
+                    term.write("\r\n\r\n"+data.replace(/\n/g, "\r\n")+"\r\n");
+                },
+                error: function(jqXHR) {
+                    term.write(`\r\nFailed with status '${jqXHR.status}': ${jqXHR.responseText}`);
+                },
+                async: false
+            });
+        }
 
-    var tools = [
-        "geoip",
-        "ssl",
-        "subnet",
-        "whois",
-        "mac",
-        "keypair"
-    ]
+        var tools = [
+            "geoip",
+            "ssl",
+            "subnet",
+            "whois",
+            "mac",
+            "keypair"
+        ]
 
-    if (args.length < 1) {
-        term.write("\r\nNo tool name provided. See help for more info");
-        return
-    }
+        if (args.length < 1) {
+            term.write("\r\nNo tool name provided. See help for more info");
+            return
+        }
 
-    var name = args.shift()
+        var name = args.shift()
 
-    if (!tools.includes(name)) {
-        term.write(`\r\nInvalid tool '${name}'. See help for more info`);
-        return
-    }
+        if (!tools.includes(name)) {
+            term.write(`\r\nInvalid tool '${name}'. See help for more info`);
+            return
+        }
 
-    executeTool(name, args)
+        executeTool(name, args)
 
-}, {summary: "Executes a tool. See man for more info", help: "geoip: Retrieves GeoIP information for source or provided address as first argument\r\n"+
-                                                             "ssl: Retrieves SSL informatio for host provided as first argument\r\n"+
-                                                             "subnet: Subnet calculator for provided IP with mask/cidr\r\n"+
-                                                             "whois: WHOIS information for host provided as first argument\r\n"+
-                                                             "mac: Lookup vendor for provided MAC address\r\n"+
-                                                             "keypair: Generates RSA keypair with optional comment (for dev only)"}))
+    })
+    .withSummary("Executes a tool. See man for more info")
+    .withHelp(  "geoip: Retrieves GeoIP information for source or provided address as first argument\r\n"+
+                "ssl: Retrieves SSL informatio for host provided as first argument\r\n"+
+                "subnet: Subnet calculator for provided IP with mask/cidr\r\n"+
+                "whois: WHOIS information for host provided as first argument\r\n"+
+                "mac: Lookup vendor for provided MAC address\r\n"+
+                "keypair: Generates RSA keypair with optional comment (for dev only)")
+)
 
 
 function runTerminal() {
@@ -179,7 +227,7 @@ function runTerminal() {
                     
                     if (command !== "") {
                         if (commandCollection.exists(command)) {
-                            commandCollection.get(command).func(inputBufferSplit);
+                            commandCollection.get(command).execute(inputBufferSplit);
                         } else {
                             term.write(`\r\n${command}: command not found`);
                         }

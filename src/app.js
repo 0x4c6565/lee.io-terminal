@@ -29,7 +29,7 @@ function Command(func) {
         return this
     }
 
-    this.withHelp = function(help) {
+    this.withMan = function(help) {
         this.help = help
         return this
     }
@@ -39,7 +39,7 @@ function Command(func) {
         return this
     }
 
-    this.getHelp = function() {
+    this.getMan = function() {
         return this.help
     }
 
@@ -86,7 +86,7 @@ commandCollection.add("about",
                     "\r\nTwitter: https://twitter.com/leespottiswood");
     })
     .withSummary("Prints information about me")
-    .withHelp("Prints information about me")
+    .withMan("Prints information about me")
 );
 
 commandCollection.add("help", 
@@ -112,7 +112,7 @@ commandCollection.add("help",
 
     })
     .withSummary("Prints help page")
-    .withHelp("Prints help page")
+    .withMan("Prints help page")
 )
 
 commandCollection.add("man", 
@@ -122,10 +122,10 @@ commandCollection.add("man",
             return;
         }
 
-        term.write('\r\n'+commandCollection.get(args).getHelp());
+        term.write('\r\n'+commandCollection.get(args).getMan());
     })
     .withSummary("Shows man page for command")
-    .withHelp("no, u")
+    .withMan("no, u")
 )
 
 commandCollection.add("clear", 
@@ -133,7 +133,7 @@ commandCollection.add("clear",
         term.clear();
     })
     .withSummary("Clears the terminal")
-    .withHelp("Clears the terminal")
+    .withMan("Clears the terminal")
     .withHidden()
 )
 
@@ -181,7 +181,7 @@ commandCollection.add("tool",
 
     })
     .withSummary("Executes a tool. See man for more info")
-    .withHelp(  "geoip: Retrieves GeoIP information for source or provided address as first argument\r\n"+
+    .withMan(  "geoip: Retrieves GeoIP information for source or provided address as first argument\r\n"+
                 "ssl: Retrieves SSL informatio for host provided as first argument\r\n"+
                 "subnet: Subnet calculator for provided IP with mask/cidr\r\n"+
                 "whois: WHOIS information for host provided as first argument\r\n"+

@@ -241,8 +241,12 @@ function runTerminal() {
                 break;
             case '\u007F': // Backspace
                 if (cursorX > 0) {
-                    term.write('\b \b');
-                    inputBuffer = inputBuffer.substring(0, inputBuffer.length-1)
+                    var cursorSuffix = inputBuffer.substr(cursorX);
+                    inputBuffer = inputBuffer.substr(0, cursorX-1) + cursorSuffix;
+                    var arrowPadding = cursorSuffix.length > 1 ? `\x1b[${cursorSuffix.length}D` : ''
+                    var outputBuffer = inputBuffer + arrowPadding
+    
+                    clearAndPrompt(outputBuffer)
                     cursorX--;
                 }
                 break;

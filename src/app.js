@@ -15,6 +15,26 @@ term.element.style.padding = '10px'
 term.loadAddon(fitAddon);
 fitAddon.fit();
 
+function leeioTerm() {
+    this.inputBuffer = '';
+    this.cursorX = 0;
+
+    this.setCursor = function(pos) {
+        if (pos < this.inputBuffer.length) {
+
+        }
+
+        cursorX = pos
+    }
+
+    this.setCursorLeft = function() {
+        this.setCursor(this.cursorX - 1)
+    }
+
+    this.setCursorRight = function() {
+        this.setCursor(this.cursorX + 1)
+    }
+}
 
 function Command(func) {
     this.func = func
@@ -243,12 +263,34 @@ function runTerminal() {
                 if (cursorX > 0) {
                     var cursorSuffix = inputBuffer.substr(cursorX);
                     inputBuffer = inputBuffer.substr(0, cursorX-1) + cursorSuffix;
-                    var arrowPadding = cursorSuffix.length > 1 ? `\x1b[${cursorSuffix.length}D` : ''
+                    var arrowPadding = cursorSuffix.length > 0 ? `\x1b[${cursorSuffix.length}D` : ''
                     var outputBuffer = inputBuffer + arrowPadding
     
                     clearAndPrompt(outputBuffer)
                     cursorX--;
                 }
+                break;
+            case '\x1b[3~': // Delete
+                if (cursorX < inputBuffer.length) {
+                    var cursorSuffix = inputBuffer.substr(cursorX+1);
+                    inputBuffer = inputBuffer.substr(0, cursorX) + cursorSuffix;
+                    var arrowPadding = cursorSuffix.length > 0 ? `\x1b[${cursorSuffix.length}D` : ''
+                    var outputBuffer = inputBuffer + arrowPadding
+    
+                    clearAndPrompt(outputBuffer)
+                }    
+                break;
+            case '\x1b[H': // Home
+                if (cursorX > 0) {
+                    term.write(`\x1b[${cursorX}D`)
+                    cursorX = 0
+                }    
+                break;
+            case '\x1b[F': // End
+                if (cursorX < inputBuffer.length) {
+                    term.write(`\x1b[${inputBuffer.length - cursorX}C`)
+                    cursorX = inputBuffer.length
+                }    
                 break;
             case '\x1b[D': // Left arrow
                 if (cursorX > 0) {

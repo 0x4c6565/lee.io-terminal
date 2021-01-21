@@ -15,27 +15,6 @@ term.element.style.padding = '10px'
 term.loadAddon(fitAddon);
 fitAddon.fit();
 
-function leeioTerm() {
-    this.inputBuffer = '';
-    this.cursorX = 0;
-
-    this.setCursor = function(pos) {
-        if (pos < this.inputBuffer.length) {
-
-        }
-
-        cursorX = pos
-    }
-
-    this.setCursorLeft = function() {
-        this.setCursor(this.cursorX - 1)
-    }
-
-    this.setCursorRight = function() {
-        this.setCursor(this.cursorX + 1)
-    }
-}
-
 function Command(func) {
     this.func = func
 
@@ -71,49 +50,244 @@ function Command(func) {
         return this.hidden
     }
 
-    this.execute = function(args) {
-        return this.func(args)
+    this.execute = function(cmd, ...args) {
+        return this.func(cmd, ...args)
     }
 }
 
-var commandCollection = {
-    "commands": [],
-    "exists": function(command) {
-        return (command in this.commands);
-    },
-    "get": function(command) {
-        if (this.exists(command)) {
-            return this.commands[command];
+function leeioTerminal() {
+    this._commands = [];
+    
+    this.promptText = 'lee.io > ';
+
+    this.inputBuffer = '';
+    this.cursorX = 0;
+    this.history = [];
+    this.historyScrollPos = 0;
+    this.historyLimit = 100;
+    this.lastExitCode = 0;
+
+    this.addCommand = function(name, cmd) {
+        if (!this.commandExists(name)) {
+            this._commands[name] = cmd
+        }
+    }
+
+    this.commandExists = function(name) {
+        return (name in this._commands);
+    }
+
+    this.getCommand = function(name) {
+        if (this.commandExists(name)) {
+            return this._commands[name];
         }
 
         return undefined;
     },
-    "getAll": function() {
-        return this.commands;
-    },
-    "add": function(name, cmd) {
-        if (!this.exists(name)) {
-            this.commands[name] = cmd
+
+    this.getCommands = function() {
+        return this._commands
+    }
+
+    this._setCursor = function(pos) {
+        if (pos > this.cursorX && pos <= this.inputBuffer.length) {
+            term.write(`\x1b[${pos - this.cursorX}C`)
+            this.cursorX = pos
+            return
         }
+
+        if (pos < this.cursorX && pos >= 0) {
+            term.write(`\x1b[${this.cursorX - pos}D`)
+            this.cursorX = pos
+            return
+        }
+    }
+
+    this._setCursorCurrent = function() {
+        this._setCursor(this.cursorX)
+    }
+
+    this._setCursorStart = function(repeat=1) {
+        this._setCursor(0)
+    }
+
+    this._setCursorEnd = function(repeat=1) {
+        this._setCursor(this.inputBuffer.length)
+    }
+
+    this._setCursorLeft = function(repeat=1) {
+        this._setCursor(this.cursorX - repeat)
+    } 
+
+    this._setCursorRight = function(repeat=1) {
+        this._setCursor(this.cursorX + repeat)
+    }
+
+    this._prompt = function(text="") {
+        term.write("\r\x1B[K" + this.promptText + text);
+        this.inputBuffer = text
+        this.cursorX = text.length
+    }
+
+    this._newLinePrompt = function(text) {
+        term.write("\r\n");
+        this._prompt(text)
+    }
+
+    this._writeAtCursor = function(text) {
+        var cursorSuffix = this.inputBuffer.substr(this.cursorX);
+        var output = this.inputBuffer.substr(0, this.cursorX) + text + cursorSuffix;
+        
+        this._prompt(output)
+        if (cursorSuffix.length > 0) {
+            this._setCursorLeft(cursorSuffix.length)
+        }
+    }
+
+    this._deleteBeforeCursor = function() {
+        var cursorSuffix = this.inputBuffer.substr(this.cursorX);
+        var output = this.inputBuffer.substr(0, this.cursorX-1) + cursorSuffix;
+
+        this._prompt(output)
+        if (cursorSuffix.length > 0) {
+            this._setCursorLeft(cursorSuffix.length)
+        }
+    }
+
+    this._deleteAtCursor = function() {
+        var cursorSuffix = this.inputBuffer.substr(this.cursorX + 1);
+        var output = this.inputBuffer.substr(0, this.cursorX) + cursorSuffix;
+
+        this._prompt(output)
+        if (cursorSuffix.length > 0) {
+            this._setCursorLeft(cursorSuffix.length)
+        }
+    }
+
+    this._scrollHistoryPrevious = function() {
+        if (this.history.length > 0) {
+            if (this.historyScrollPos < this.history.length) {                        
+                this.historyScrollPos++;
+            }
+            
+            this._prompt(this.history[this.historyScrollPos-1])
+        }
+    }
+
+    this._scrollHistoryNext = function() {
+        if (this.history.length > 0 && this.historyScrollPos > 0) {
+            this.historyScrollPos--;
+
+            var output = ""
+            if (this.historyScrollPos > 0) {                        
+                output = this.history[this.historyScrollPos-1]
+            }
+            
+            this._prompt(output)
+        }
+    }
+
+    this._commandOutputFunc = function() {
+        return {
+            stdOut: function(text) {
+                term.write(text)
+            },
+            stdErr: function(text) {
+                term.write(text)
+            },
+            exit: function(code) {
+                this.lastExitCode = code
+            }
+        }
+    }
+
+    this.run = function() {
+        term.onData(e => {
+            switch (e) {                
+                case '\r': // Enter
+                    if (this.inputBuffer.length > 0) {
+                        if (this.history.length > this.historyLimit) {
+                            this.history.pop()
+                        }
+                        this.history.unshift(this.inputBuffer)
+                        
+                        let inputBufferSplit = this.inputBuffer.split(' ')
+                        let command = inputBufferSplit.shift();
+                        
+                        if (command !== "") {
+                            if (this.commandExists(command)) {
+                                this.getCommand(command).execute(this._commandOutputFunc(), ...inputBufferSplit);
+                            } else {
+                                term.write(`\r\n${command}: command not found`);
+                            }
+                        }
+                    }
+                case '\u0003': // Ctrl+C
+                    this._newLinePrompt();
+                    break;
+                case '\u007F': // Backspace
+                    this._deleteBeforeCursor();
+                    break;
+                case '\x1b[3~': // Delete
+                    this._deleteAtCursor();
+                    break;
+                case '\x1b[D': // Left arrow
+                    this._setCursorLeft();
+                    break;
+                case '\x1b[C': // Right arrow
+                    this._setCursorRight();  
+                    break;
+                case '\x1b[A': // Up arrow
+                    this._scrollHistoryPrevious();
+                    break;
+                case '\x1b[B': // Down arrow
+                    this._scrollHistoryNext();
+                    break;
+                case '\x1b[H': // Home
+                    this._setCursorStart();
+                    break;
+                case '\x1b[F': // End
+                    this._setCursorEnd();
+                    break;
+                default: // Add characters to buffer
+                    this._writeAtCursor(e);
+            }
+        });
+
+        this.addCommand("clear", 
+            new Command(function() {
+                term.clear();
+            })
+            .withSummary("Clears the terminal")
+            .withMan("Clears the terminal")
+            .withHidden()
+        );
+
+        term.write('Type \x1B[34mhelp\x1B[0m for help');
+        this._newLinePrompt();
+        term.focus();
     }
 }
 
-commandCollection.add("about", 
-    new Command(function() {
-        term.write( "\r\nI r Lee Spottiswood. I do Dev(Ops) shit\r\n"+
-                    "\r\nGithub: https://github.com/0x4c6565"+
-                    "\r\nGitLab: https://gitlab.com/0x4c6565"+
-                    "\r\nTwitter: https://twitter.com/leespottiswood");
+var terminal = new leeioTerminal()
+
+
+terminal.addCommand("about", 
+    new Command(function(cmd) {
+        cmd.stdOut("\r\nI r Lee Spottiswood. I do Dev(Ops) shit\r\n"+
+        "\r\nGithub: https://github.com/0x4c6565"+
+        "\r\nGitLab: https://gitlab.com/0x4c6565"+
+        "\r\nTwitter: https://twitter.com/leespottiswood")
     })
     .withSummary("Prints information about me")
     .withMan("Prints information about me")
 );
 
-commandCollection.add("help", 
-    new Command(function() {
+terminal.addCommand("help", 
+    new Command(function(cmd) {
         function getCommandNameMaxLength() {
             var length = 10;
-            for (var commandName in commandCollection.getAll()) {
+            for (var commandName in terminal.getCommands()) {
                 if (commandName.length > length) {
                     length = commandName.length
                 }
@@ -121,12 +295,12 @@ commandCollection.add("help",
             return length
         }
 
-        term.write("\r\nCommands:\r\n");
+        cmd.stdOut("\r\nCommands:\r\n");
         var commandPadLength = getCommandNameMaxLength();
-        for (var commandName in commandCollection.getAll()) {
-            var command = commandCollection.get(commandName);
+        for (var commandName in terminal.getCommands()) {
+            var command = terminal.getCommand(commandName);
             if (!command.getHidden()) {
-                term.write(`\r\n${commandName.padEnd(commandPadLength, ' ')} : `+commandCollection.get(commandName).getSummary());
+                cmd.stdOut(`\r\n${commandName.padEnd(commandPadLength, ' ')} : ` + command.getSummary());
             }
         }
 
@@ -135,31 +309,22 @@ commandCollection.add("help",
     .withMan("Prints help page")
 )
 
-commandCollection.add("man", 
-    new Command(function(args) {
-        if (!commandCollection.exists(args)) {
-            term.write(`\r\nNo manual entry for '${args}'`);
+terminal.addCommand("man", 
+    new Command(function(cmd, name) {
+        if (!terminal.commandExists(name)) {
+            cmd.stdErr(`\r\nNo manual entry for '${name != undefined ? name : ""}'`);
+            cmd.exit(1)
             return;
         }
 
-        term.write('\r\n'+commandCollection.get(args).getMan());
+        cmd.stdOut('\r\n'+terminal.getCommand(name).getMan());
     })
     .withSummary("Shows man page for command")
     .withMan("no, u")
 )
 
-commandCollection.add("clear", 
-    new Command(function() {
-        term.clear();
-    })
-    .withSummary("Clears the terminal")
-    .withMan("Clears the terminal")
-    .withHidden()
-)
-
-
-commandCollection.add("tool", 
-    new Command(function(args) {
+terminal.addCommand("tool", 
+    new Command(function(cmd, name, ...args) {
         function executeTool(name, args) {
             var uri = (`https://lee.io/${name}/${args.join("/")}`).replace(/\/$/, "")
         
@@ -167,10 +332,10 @@ commandCollection.add("tool",
                 url: uri,
                 dataType: 'text',
                 success: function(data) {
-                    term.write("\r\n\r\n"+data.replace(/\n/g, "\r\n")+"\r\n");
+                    cmd.stdOut("\r\n\r\n"+data.replace(/\n/g, "\r\n")+"\r\n");
                 },
                 error: function(jqXHR) {
-                    term.write(`\r\nFailed with status '${jqXHR.status}': ${jqXHR.responseText}`);
+                    cmd.stdErr(`\r\nFailed with status '${jqXHR.status}': ${jqXHR.responseText}`);
                 },
                 async: false
             });
@@ -186,14 +351,14 @@ commandCollection.add("tool",
         ]
 
         if (args.length < 1) {
-            term.write("\r\nNo tool name provided. See help for more info");
+            cmd.stdErr("\r\nNo tool name provided. See help for more info");
             return
         }
 
         var name = args.shift()
 
         if (!tools.includes(name)) {
-            term.write(`\r\nInvalid tool '${name}'. See help for more info`);
+            cmd.stdErr(`\r\nInvalid tool '${name}'. See help for more info`);
             return
         }
 
@@ -209,142 +374,4 @@ commandCollection.add("tool",
                 "keypair: Generates RSA keypair with optional comment (for dev only)")
 )
 
-
-function runTerminal() {
-    if (term._initialized) {
-      return;
-    }
-
-    term._initialized = true;
-
-    var promptText = 'lee.io > ';
-
-    function prompt(prefix="\r\n", suffix="") {
-        term.write(`${prefix}${promptText}${suffix}`);
-    };
-    
-    function clearAndPrompt(text) {
-        prompt("\r\x1B[K", text)
-    }
-
-    var history = []
-    var historyPos = 0
-    var historyLimit = 100;
-    var cursorX = 0;
-    var inputBuffer = "";
-
-    term.onData(e => {
-        switch (e) {
-            case '\r': // Enter
-                if (inputBuffer.length > 0) {
-                    if (history.length > historyLimit) {
-                        history.pop()
-                    }
-                    history.unshift(inputBuffer)
-                    
-                    let inputBufferSplit = inputBuffer.split(' ')
-                    let command = inputBufferSplit.shift();
-                    
-                    if (command !== "") {
-                        if (commandCollection.exists(command)) {
-                            commandCollection.get(command).execute(inputBufferSplit);
-                        } else {
-                            term.write(`\r\n${command}: command not found`);
-                        }
-                    }
-                }
-            case '\u0003': // Ctrl+C
-                inputBuffer = "";
-                cursorX = 0;
-                historyPos = 0
-                prompt();
-                break;
-            case '\u007F': // Backspace
-                if (cursorX > 0) {
-                    var cursorSuffix = inputBuffer.substr(cursorX);
-                    inputBuffer = inputBuffer.substr(0, cursorX-1) + cursorSuffix;
-                    var arrowPadding = cursorSuffix.length > 0 ? `\x1b[${cursorSuffix.length}D` : ''
-                    var outputBuffer = inputBuffer + arrowPadding
-    
-                    clearAndPrompt(outputBuffer)
-                    cursorX--;
-                }
-                break;
-            case '\x1b[3~': // Delete
-                if (cursorX < inputBuffer.length) {
-                    var cursorSuffix = inputBuffer.substr(cursorX+1);
-                    inputBuffer = inputBuffer.substr(0, cursorX) + cursorSuffix;
-                    var arrowPadding = cursorSuffix.length > 0 ? `\x1b[${cursorSuffix.length}D` : ''
-                    var outputBuffer = inputBuffer + arrowPadding
-    
-                    clearAndPrompt(outputBuffer)
-                }    
-                break;
-            case '\x1b[H': // Home
-                if (cursorX > 0) {
-                    term.write(`\x1b[${cursorX}D`)
-                    cursorX = 0
-                }    
-                break;
-            case '\x1b[F': // End
-                if (cursorX < inputBuffer.length) {
-                    term.write(`\x1b[${inputBuffer.length - cursorX}C`)
-                    cursorX = inputBuffer.length
-                }    
-                break;
-            case '\x1b[D': // Left arrow
-                if (cursorX > 0) {
-                    term.write(e);
-                    cursorX--;
-                }        
-                break;
-            case '\x1b[C': // Right arrow
-                if (cursorX < inputBuffer.length) {
-                    term.write(e);
-                    cursorX++;
-                }        
-                break;
-            case '\x1b[A': // Up arrow
-                if (history.length > 0) {
-                    if (historyPos < history.length) {                        
-                        historyPos++;
-                    }
-                    inputBuffer = history[historyPos-1]
-                    clearAndPrompt(inputBuffer)
-                    cursorX = inputBuffer.length
-                }
-                break;
-            case '\x1b[B': // Down arrow
-                if (history.length > 0 && historyPos > 0) {
-                    historyPos--;
-
-                    if (historyPos > 0) {
-                        inputBuffer = history[historyPos-1]
-                        clearAndPrompt(inputBuffer)
-                        cursorX = inputBuffer.length
-                    } else {
-                        cursorX = 0;
-                        inputBuffer = "";
-                        clearAndPrompt()
-                    }
-                }
-                break;
-            default: // Add characters to buffer
-                var cursorSuffix = inputBuffer.substr(cursorX);
-                inputBuffer = inputBuffer.substr(0, cursorX) + e + cursorSuffix;
-                var outputBuffer = inputBuffer
-                if (cursorSuffix.length > 0) {
-                    outputBuffer += `\x1b[${cursorSuffix.length}D`
-                }
-
-                clearAndPrompt(outputBuffer)
-                cursorX += e.length;
-        }
-    });
-
-    term.write('Type \x1B[34mhelp\x1B[0m for help');
-    prompt();
-    term.focus();
-}
-
-runTerminal()
+terminal.run()

@@ -350,12 +350,10 @@ terminal.addCommand("tool",
             "keypair"
         ]
 
-        if (args.length < 1) {
+        if (name === undefined || name == "") {
             cmd.stdErr("\r\nNo tool name provided. See help for more info");
             return
         }
-
-        var name = args.shift()
 
         if (!tools.includes(name)) {
             cmd.stdErr(`\r\nInvalid tool '${name}'. See help for more info`);

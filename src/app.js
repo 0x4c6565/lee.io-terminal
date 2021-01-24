@@ -224,6 +224,7 @@ function leeioTerminal() {
                     }
                 case '\u0003': // Ctrl+C
                     this._newLinePrompt();
+                    this.historyScrollPos = 0;
                     break;
                 case '\u007F': // Backspace
                     this._deleteBeforeCursor();

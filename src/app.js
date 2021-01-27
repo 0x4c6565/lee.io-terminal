@@ -275,7 +275,7 @@ var terminal = new leeioTerminal()
 
 terminal.addCommand("about", 
     new Command(function(cmd) {
-        cmd.stdOut("\r\nI r Lee Spottiswood. I do Dev(Ops) shit\r\n"+
+        cmd.stdOut("\r\nI'm Lee Spottiswood and I do Dev(Ops) shit\r\n"+
         "\r\nGithub: https://github.com/0x4c6565"+
         "\r\nGitLab: https://gitlab.com/0x4c6565"+
         "\r\nTwitter: https://twitter.com/leespottiswood")
@@ -326,14 +326,16 @@ terminal.addCommand("man",
 
 terminal.addCommand("tool", 
     new Command(function(cmd, name, ...args) {
-        function executeTool(name, args) {
-            var uri = (`https://lee.io/${name}/${args.join("/")}`).replace(/\/$/, "")
-        
+        function doRequest(uri, decorateOutput=false) {        
             $.ajax({
                 url: uri,
                 dataType: 'text',
                 success: function(data) {
-                    cmd.stdOut("\r\n\r\n"+data.replace(/\n/g, "\r\n")+"\r\n");
+                    var padding = '';
+                    if (decorateOutput == true) {
+                        padding = "\r\n";
+                    }
+                    cmd.stdOut(`${padding}\r\n${data.trim().replace(/\n/g, "\r\n")}${padding}`);
                 },
                 error: function(jqXHR) {
                     cmd.stdErr(`\r\nFailed with status '${jqXHR.status}': ${jqXHR.responseText}`);
@@ -342,35 +344,47 @@ terminal.addCommand("tool",
             });
         }
 
-        var tools = [
-            "geoip",
-            "ssl",
-            "subnet",
-            "whois",
-            "mac",
-            "keypair"
-        ]
+        function executeTool(name, args) {
+            var uri = (`https://lee.io/${name}/${args.join("/")}`).replace(/\/$/, "")
+            doRequest(uri, true)
+        }
+
+        var tools = {
+            "geoip": executeTool,
+            "ip": function() { doRequest("https://ip.lee.io") },
+            "ipv4": function() { doRequest("https://ipv4.lee.io") },
+            "ipv6": function() { doRequest("https://ipv6.lee.io") },
+            "port": executeTool,
+            "ssl": executeTool,
+            "subnet": executeTool,
+            "whois": executeTool,
+            "mac": executeTool,
+            "selfsigned": executeTool,
+            "keypair": executeTool,
+        }
 
         if (name === undefined || name == "") {
-            cmd.stdErr("\r\nNo tool name provided. See help for more info");
+            cmd.stdErr("\r\nNo tool name provided. See man for more info");
             return
         }
 
-        if (!tools.includes(name)) {
-            cmd.stdErr(`\r\nInvalid tool '${name}'. See help for more info`);
+        if (!(name in tools)) {
+            cmd.stdErr(`\r\nInvalid tool '${name}'. See man for more info`);
             return
         }
 
-        executeTool(name, args)
-
+        tools[name](name, args)
     })
     .withSummary("Executes a tool. See man for more info")
-    .withMan(  "geoip: Retrieves GeoIP information for source or provided address as first argument\r\n"+
-                "ssl: Retrieves SSL informatio for host provided as first argument\r\n"+
-                "subnet: Subnet calculator for provided IP with mask/cidr\r\n"+
-                "whois: WHOIS information for host provided as first argument\r\n"+
-                "mac: Lookup vendor for provided MAC address\r\n"+
-                "keypair: Generates RSA keypair with optional comment (for dev only)")
+    .withMan(   "# GeoIP information - Retrieves GeoIP information for source or provided ip/host\r\nUsage: tool geoip <optional: ip/host>\r\n\r\n"+
+                "# IP information - Retrieves IP address\r\nUsage: tool ip|ipv4|ipv6\r\n\r\n"+
+                "# Port checker - Checks TCP connectivity to specified port to source or provided ip/host\r\nUsage: tool port <port> <optional: ip/host>\r\n\r\n"+
+                "# SSL validator - Retrieves SSL information for ip/host\r\nUsage: tool ssl <ip/host>\r\n\r\n"+
+                "# Subnet calculator  - Subnet calculator for provided ip + cidr/mask\r\nUsage: tool subnet <ip> <cidr/mask>\r\n\r\n"+
+                "# WHOIS information - WHOIS information for source or provided ip/host\r\nUsage: tool whois <optional: ip/host>\r\n\r\n"+
+                "# MAC address lookup - Lookup vendor for provided MAC address\r\nUsage: tool mac <mac>\r\n\r\n"+
+                "# Self-signed certificate generator - Generate self-signed certificate for specified DN\r\nUsage: tool selfsigned <dn> <optional: days>\r\n\r\n"+
+                "# RSA Keypair generator - Generates RSA keypair (for dev only)\r\nUsage: tool keypair <optional: comment>")
 )
 
 terminal.run()

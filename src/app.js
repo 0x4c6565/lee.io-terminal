@@ -28,7 +28,7 @@ function Command(func) {
         return this
     }
 
-    this.withMan = function(help) {
+    this.withHelp = function(help) {
         this.help = help
         return this
     }
@@ -38,7 +38,7 @@ function Command(func) {
         return this
     }
 
-    this.getMan = function() {
+    this.getHelp = function() {
         return this.help
     }
 
@@ -55,17 +55,8 @@ function Command(func) {
     }
 }
 
-function leeioTerminal() {
+function CommandCollection() {
     this._commands = [];
-    
-    this.promptText = 'lee.io > ';
-
-    this.inputBuffer = '';
-    this.cursorX = 0;
-    this.history = [];
-    this.historyScrollPos = 0;
-    this.historyLimit = 100;
-    this.lastExitCode = 0;
 
     this.addCommand = function(name, cmd) {
         if (!this.commandExists(name)) {
@@ -88,6 +79,19 @@ function leeioTerminal() {
     this.getCommands = function() {
         return this._commands
     }
+}
+
+function leeioTerminal() {    
+    this.promptText = 'lee.io > ';
+
+    this.commandCollection = null;
+    this.internalCommandCollection = new CommandCollection();
+    this.inputBuffer = '';
+    this.cursorX = 0;
+    this.history = [];
+    this.historyScrollPos = 0;
+    this.historyLimit = 100;
+    this.lastExitCode = 0;
 
     this._setCursor = function(pos) {
         if (pos > this.cursorX && pos <= this.inputBuffer.length) {
@@ -107,11 +111,11 @@ function leeioTerminal() {
         this._setCursor(this.cursorX)
     }
 
-    this._setCursorStart = function(repeat=1) {
+    this._setCursorStart = function() {
         this._setCursor(0)
     }
 
-    this._setCursorEnd = function(repeat=1) {
+    this._setCursorEnd = function() {
         this._setCursor(this.inputBuffer.length)
     }
 
@@ -193,7 +197,7 @@ function leeioTerminal() {
                 term.write(text)
             },
             stdErr: function(text) {
-                term.write(text)
+                term.write("\u001b[31;1m"+text+"\u001b[0m")
             },
             exit: function(code) {
                 this.lastExitCode = code
@@ -201,10 +205,15 @@ function leeioTerminal() {
         }
     }
 
+    this.withCommandCollection = function(collection) {
+        this.commandCollection = collection
+        return this
+    }
+
     this.run = function() {
         term.onData(e => {
             switch (e) {                
-                case '\r': // Enter
+                case '\r': // Enter/return
                     if (this.inputBuffer.length > 0) {
                         if (this.history.length > this.historyLimit) {
                             this.history.pop()
@@ -215,8 +224,11 @@ function leeioTerminal() {
                         let command = inputBufferSplit.shift();
                         
                         if (command !== "") {
-                            if (this.commandExists(command)) {
-                                this.getCommand(command).execute(this._commandOutputFunc(), ...inputBufferSplit);
+                            
+                            if (this.internalCommandCollection.commandExists(command)) {
+                                this.internalCommandCollection.getCommand(command).execute(this._commandOutputFunc(), ...inputBufferSplit);
+                            } else if (this.commandCollection !== undefined && this.commandCollection.commandExists(command)) {
+                                this.commandCollection.getCommand(command).execute(this._commandOutputFunc(), ...inputBufferSplit);
                             } else {
                                 term.write(`\r\n${command}: command not found`);
                             }
@@ -250,18 +262,17 @@ function leeioTerminal() {
                 case '\x1b[F': // End
                     this._setCursorEnd();
                     break;
-                default: // Add characters to buffer
-                    this._writeAtCursor(e);
+                default: // Add characters to buffer (if e doesn't contain ansi escape codes)
+                    if (!e.match(/(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]/)) {
+                        this._writeAtCursor(e);
+                    }
             }
         });
 
-        this.addCommand("clear", 
+        this.internalCommandCollection.addCommand("clear", 
             new Command(function() {
-                term.clear();
+                term.reset();
             })
-            .withSummary("Clears the terminal")
-            .withMan("Clears the terminal")
-            .withHidden()
         );
 
         term.write('Type \x1B[34mhelp\x1B[0m for help');
@@ -270,10 +281,9 @@ function leeioTerminal() {
     }
 }
 
-var terminal = new leeioTerminal()
+var commandCollection = new CommandCollection()
 
-
-terminal.addCommand("about", 
+commandCollection.addCommand("about", 
     new Command(function(cmd) {
         cmd.stdOut("\r\nI'm Lee Spottiswood and I do Dev(Ops) shit\r\n"+
         "\r\nGithub: https://github.com/0x4c6565"+
@@ -281,14 +291,24 @@ terminal.addCommand("about",
         "\r\nTwitter: https://twitter.com/leespottiswood")
     })
     .withSummary("Prints information about me")
-    .withMan("Prints information about me")
+    .withHelp("Prints information about me")
 );
 
-terminal.addCommand("help", 
-    new Command(function(cmd) {
+commandCollection.addCommand("help", 
+    new Command(function(cmd, name) {
+        if (name !== undefined) {
+            if (!commandCollection.commandExists(name)) {
+                cmd.stdErr(`\r\nNo help entry for '${name != undefined ? name : ""}'`);
+                cmd.exit(1)
+                return;
+            }
+            cmd.stdOut('\r\n'+commandCollection.getCommand(name).getHelp());
+            return
+        }
+
         function getCommandNameMaxLength() {
             var length = 10;
-            for (var commandName in terminal.getCommands()) {
+            for (var commandName in commandCollection.getCommands()) {
                 if (commandName.length > length) {
                     length = commandName.length
                 }
@@ -298,33 +318,19 @@ terminal.addCommand("help",
 
         cmd.stdOut("\r\nCommands:\r\n");
         var commandPadLength = getCommandNameMaxLength();
-        for (var commandName in terminal.getCommands()) {
-            var command = terminal.getCommand(commandName);
+        for (var commandName in commandCollection.getCommands()) {
+            var command = commandCollection.getCommand(commandName);
             if (!command.getHidden()) {
                 cmd.stdOut(`\r\n${commandName.padEnd(commandPadLength, ' ')} : ` + command.getSummary());
             }
         }
 
     })
-    .withSummary("Prints help page")
-    .withMan("Prints help page")
+    .withSummary("Prints help page. Use 'help <command>' to display help for a command")
+    .withHelp("No u")
 )
 
-terminal.addCommand("man", 
-    new Command(function(cmd, name) {
-        if (!terminal.commandExists(name)) {
-            cmd.stdErr(`\r\nNo manual entry for '${name != undefined ? name : ""}'`);
-            cmd.exit(1)
-            return;
-        }
-
-        cmd.stdOut('\r\n'+terminal.getCommand(name).getMan());
-    })
-    .withSummary("Shows man page for command")
-    .withMan("no, u")
-)
-
-terminal.addCommand("tool", 
+commandCollection.addCommand("tool", 
     new Command(function(cmd, name, ...args) {
         function doRequest(uri, decorateOutput=false) {        
             $.ajax({
@@ -364,19 +370,19 @@ terminal.addCommand("tool",
         }
 
         if (name === undefined || name == "") {
-            cmd.stdErr("\r\nNo tool name provided. See man for more info");
+            cmd.stdErr("\r\nNo tool name provided. See help for more info");
             return
         }
 
         if (!(name in tools)) {
-            cmd.stdErr(`\r\nInvalid tool '${name}'. See man for more info`);
+            cmd.stdErr(`\r\nInvalid tool '${name}'. See help for more info`);
             return
         }
 
         tools[name](name, args)
     })
-    .withSummary("Executes a tool. See man for more info")
-    .withMan(   "# GeoIP information - Retrieves GeoIP information for source or provided ip/host\r\nUsage: tool geoip <optional: ip/host>\r\n\r\n"+
+    .withSummary("Executes a tool. See help for more info")
+    .withHelp(  "# GeoIP information - Retrieves GeoIP information for source or provided ip/host\r\nUsage: tool geoip <optional: ip/host>\r\n\r\n"+
                 "# IP information - Retrieves IP address\r\nUsage: tool ip|ipv4|ipv6\r\n\r\n"+
                 "# Port checker - Checks TCP connectivity to specified port to source or provided ip/host\r\nUsage: tool port <port> <optional: ip/host>\r\n\r\n"+
                 "# SSL validator - Retrieves SSL information for ip/host\r\nUsage: tool ssl <ip/host>\r\n\r\n"+
@@ -387,4 +393,6 @@ terminal.addCommand("tool",
                 "# RSA Keypair generator - Generates RSA keypair (for dev only)\r\nUsage: tool keypair <optional: comment>")
 )
 
-terminal.run()
+var terminal = new leeioTerminal()
+terminal.withCommandCollection(commandCollection)
+        .run()

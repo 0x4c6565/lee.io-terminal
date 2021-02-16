@@ -11,9 +11,13 @@ term.setOption('theme', {
     blue: '#569CD6',
     cursor: '#ECECEC'
 });
-term.element.style.padding = '10px'
 term.loadAddon(fitAddon);
-fitAddon.fit();
+term.element.style.padding = '10px'
+term.element.children[0].style.overflowY = 'auto'
+
+window.onload = function() {
+    fitAddon.fit();
+}
 
 function Command(func) {
     this.func = func

@@ -371,6 +371,8 @@ commandCollection.addCommand("tool",
             "mac": executeTool,
             "selfsigned": executeTool,
             "keypair": executeTool,
+            "p.lee.io": function() {window.open("https://p.lee.io")},
+            "pw.lee.io": function(name, args) {window.open(`https://pw.lee.io/${args}`)},
         }
 
         if (name === undefined || name == "") {
@@ -394,7 +396,9 @@ commandCollection.addCommand("tool",
                 "# WHOIS information - WHOIS information for source or provided ip/host\r\nUsage: tool whois <optional: ip/host>\r\n\r\n"+
                 "# MAC address lookup - Lookup vendor for provided MAC address\r\nUsage: tool mac <mac>\r\n\r\n"+
                 "# Self-signed certificate generator - Generate self-signed certificate for specified DN\r\nUsage: tool selfsigned <dn> <optional: days>\r\n\r\n"+
-                "# RSA Keypair generator - Generates RSA keypair (for dev only)\r\nUsage: tool keypair <optional: comment>")
+                "# RSA Keypair generator - Generates RSA keypair (for dev only)\r\nUsage: tool keypair <optional: comment>\r\n\r\n"+
+                "# Pastebin - Opens pastebin in new tab\r\nUsage: tool p.lee.io\r\n\r\n"+
+                "# Password generator - Opens password generator in new tab\r\nUsage: tool pw.lee.io <optional: length>")
 )
 
 var terminal = new leeioTerminal()

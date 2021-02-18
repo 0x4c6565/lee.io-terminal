@@ -2,6 +2,8 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import './xterm.css';
 
+const arg = require('arg');
+
 var term = new Terminal();
 var fitAddon = new FitAddon();
 term.open(document.getElementById('terminal')); 
@@ -372,7 +374,32 @@ commandCollection.addCommand("tool",
             "selfsigned": executeTool,
             "keypair": executeTool,
             "p.lee.io": function() {window.open("https://p.lee.io")},
-            "pw.lee.io": function(name, args) {window.open(`https://pw.lee.io/${args}`)},
+            "pw.lee.io": function(name, args) {
+                try{
+                    var argsParsed = arg(
+                        {
+                            '--length': Number,
+                            '--nosymbols': Boolean
+                        }, {
+                            argv: args
+                        }
+                    );
+                } catch(e) {
+                    cmd.stdErr(`\r\nInvalid args: ${e}`);
+                    return
+                }
+                
+                var uri = "https://pw.lee.io/"
+                if (argsParsed["--length"] !== undefined) {
+                    uri = uri + argsParsed["--length"];
+                }                
+                if (argsParsed["--nosymbols"] == true) {
+                    uri = uri + "?nosymbols"
+                }
+
+                window.open(uri)
+            },
+            "convert.lee.io": function() {window.open("https://convert.lee.io")},
         }
 
         if (name === undefined || name == "") {
@@ -398,7 +425,7 @@ commandCollection.addCommand("tool",
                 "# Self-signed certificate generator - Generate self-signed certificate for specified DN\r\nUsage: tool selfsigned <dn> <optional: days>\r\n\r\n"+
                 "# RSA Keypair generator - Generates RSA keypair (for dev only)\r\nUsage: tool keypair <optional: comment>\r\n\r\n"+
                 "# Pastebin - Opens pastebin in new tab\r\nUsage: tool p.lee.io\r\n\r\n"+
-                "# Password generator - Opens password generator in new tab\r\nUsage: tool pw.lee.io <optional: length>")
+                "# Password generator - Opens password generator in new tab\r\nUsage: tool pw.lee.io <optional: --length int> <optional: --nosymbols>")
 )
 
 var terminal = new leeioTerminal()

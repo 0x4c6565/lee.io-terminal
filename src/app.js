@@ -373,8 +373,8 @@ commandCollection.addCommand("tool",
             "mac": executeTool,
             "selfsigned": executeTool,
             "keypair": executeTool,
-            "p.lee.io": function() {window.open("https://p.lee.io")},
-            "pw.lee.io": function(name, args) {
+            "pastebin": function() {window.open("https://p.lee.io")},
+            "pw": function(name, args) {
                 try{
                     var argsParsed = arg(
                         {
@@ -399,7 +399,7 @@ commandCollection.addCommand("tool",
 
                 window.open(uri)
             },
-            "convert.lee.io": function() {window.open("https://convert.lee.io")},
+            "convert": function() {window.open("https://convert.lee.io")},
         }
 
         if (name === undefined || name == "") {
@@ -424,8 +424,9 @@ commandCollection.addCommand("tool",
                 "# MAC address lookup - Lookup vendor for provided MAC address\r\nUsage: tool mac <mac>\r\n\r\n"+
                 "# Self-signed certificate generator - Generate self-signed certificate for specified DN\r\nUsage: tool selfsigned <dn> <optional: days>\r\n\r\n"+
                 "# RSA Keypair generator - Generates RSA keypair (for dev only)\r\nUsage: tool keypair <optional: comment>\r\n\r\n"+
-                "# Pastebin - Opens pastebin in new tab\r\nUsage: tool p.lee.io\r\n\r\n"+
-                "# Password generator - Opens password generator in new tab\r\nUsage: tool pw.lee.io <optional: --length int> <optional: --nosymbols>")
+                "# Pastebin - Opens pastebin in new tab\r\nUsage: tool pastebin\r\n\r\n"+
+                "# Password generator - Opens password generator in new tab\r\nUsage: tool pw [--length <int>] [--nosymbols]\r\n\r\n"+
+                "# Converter - Opens converter in new tab\r\nUsage: tool convert")
 )
 
 var terminal = new leeioTerminal()

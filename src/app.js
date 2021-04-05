@@ -3,6 +3,9 @@ import { FitAddon } from 'xterm-addon-fit';
 import './xterm.css';
 
 const arg = require('arg');
+const Command = require('./command');
+const CommandCollection = require('./command-collection');
+const ReadLinePlugin = require('./plugins/readline');
 
 var term = new Terminal();
 var fitAddon = new FitAddon();
@@ -21,72 +24,6 @@ window.onload = function() {
     fitAddon.fit();
 }
 
-function Command(func) {
-    this.func = func
-
-    this.withFunc = function(func) {
-        this.func = func
-        return this
-    }
-
-    this.withSummary = function(summary) {
-        this.summary = summary
-        return this
-    }
-
-    this.withHelp = function(help) {
-        this.help = help
-        return this
-    }
-
-    this.withHidden = function() {
-        this.hidden = true
-        return this
-    }
-
-    this.getHelp = function() {
-        return this.help
-    }
-
-    this.getSummary = function() {
-        return this.summary
-    }
-
-    this.getHidden = function() {
-        return this.hidden
-    }
-
-    this.execute = function(cmd, ...args) {
-        return this.func(cmd, ...args)
-    }
-}
-
-function CommandCollection() {
-    this._commands = [];
-
-    this.addCommand = function(name, cmd) {
-        if (!this.commandExists(name)) {
-            this._commands[name] = cmd
-        }
-    }
-
-    this.commandExists = function(name) {
-        return (name in this._commands);
-    }
-
-    this.getCommand = function(name) {
-        if (this.commandExists(name)) {
-            return this._commands[name];
-        }
-
-        return undefined;
-    },
-
-    this.getCommands = function() {
-        return this._commands
-    }
-}
-
 function leeioTerminal() {    
     this.promptText = 'lee.io > ';
 
@@ -98,6 +35,8 @@ function leeioTerminal() {
     this.historyScrollPos = 0;
     this.historyLimit = 100;
     this.lastExitCode = 0;
+    this.plugins = [];
+    this.currentPlugin = null;
 
     this._setCursor = function(pos) {
         if (pos > this.cursorX && pos <= this.inputBuffer.length) {
@@ -133,10 +72,25 @@ function leeioTerminal() {
         this._setCursor(this.cursorX + repeat)
     }
 
+    this._clearLine = function() {
+        term.write("\r\x1B[K");
+        this.inputBuffer = '';
+    }
+
+    this._write = function(text) {
+        term.write(text)
+        this.inputBuffer = this.inputBuffer + text
+        this.cursorX = this.inputBuffer.length
+    }
+
+    this._clearLineWrite = function(prefix="", text="") {
+        this._clearLine();
+        term.write(prefix);
+        this._write(text)
+    }
+
     this._prompt = function(text="") {
-        term.write("\r\x1B[K" + this.promptText + text);
-        this.inputBuffer = text
-        this.cursorX = text.length
+        this._clearLineWrite(this.promptText, text)
     }
 
     this._newLinePrompt = function(text) {
@@ -216,8 +170,23 @@ function leeioTerminal() {
         return this
     }
 
+    this.withPlugin = function(name, register, pluginClass) {
+        this.plugins[name] = {
+            "register": register,
+            "pluginClass": pluginClass
+        }
+        return this
+    }
+
     this.run = function() {
-        term.onData(e => {
+        term.onData(e => {            
+            if (this.currentPlugin != null) {
+                if (!this.currentPlugin.input(this, e)) {
+                    return;
+                }
+            }            
+            this.currentPlugin = null;
+
             switch (e) {                
                 case '\r': // Enter/return
                     if (this.inputBuffer.length > 0) {
@@ -268,9 +237,17 @@ function leeioTerminal() {
                 case '\x1b[F': // End
                     this._setCursorEnd();
                     break;
-                default: // Add characters to buffer (if e doesn't contain ansi escape codes)
+                default:
+                    for (var plugin in this.plugins) {
+                        if (this.plugins[plugin].register == e) {
+                            this.currentPlugin = new this.plugins[plugin].pluginClass()
+                            return this.currentPlugin.input(this, e)
+                        }
+                    }
+                    
+                    // Add characters to buffer (if e doesn't contain ansi escape codes)
                     if (!e.match(/(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]/)) {
-                        this._writeAtCursor(e);
+                        return this._writeAtCursor(e);
                     }
             }
         });
@@ -429,6 +406,8 @@ commandCollection.addCommand("tool",
                 "# Converter - Opens converter in new tab\r\nUsage: tool convert")
 )
 
+
 var terminal = new leeioTerminal()
-terminal.withCommandCollection(commandCollection)
+    .withCommandCollection(commandCollection)
+    .withPlugin('readline', '\u0012', ReadLinePlugin)
         .run()

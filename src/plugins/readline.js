@@ -27,6 +27,7 @@ module.exports = function() {
             case '\u007F':
                 if (this.search.length > 0) {
                     this.search = this.search.slice(0, -1);
+                    this.historyScrollPos = 0;
                 }
                 break;
             case '\u0012':
@@ -35,20 +36,22 @@ module.exports = function() {
                         this.historyScrollPos++;
                     }
                 }
-            default:                
+                break;
+            default:
                 if (input.match(/^[a-zA-Z0-9]+$/)) {
                     this.search = this.search + input
-                }
-
-                failed = true
-                for (var i = this.historyScrollPos; i < term.history.length; i++) {
-                    if (term.history[i].match(this.search)) {
-                        this.historyScrollPos = i;
-                        failed = false
-                        this.found = term.history[this.historyScrollPos];
-                        break;
-                    }
-                }
+                    this.historyScrollPos = 0;
+                }                
+        }
+        
+        failed = true
+        for (var i = this.historyScrollPos; i < term.history.length; i++) {
+            if (term.history[i].match(this.search)) {
+                this.historyScrollPos = i;
+                failed = false
+                this.found = term.history[this.historyScrollPos];
+                break;
+            }
         }
         write(this.search, this.found);
     }

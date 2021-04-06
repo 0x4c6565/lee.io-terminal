@@ -5,8 +5,13 @@ module.exports = function() {
     this.first = true;
     
     this.input = function(term, input) {
+        var failed = false
         var write = function(searchTerm, text) {
-            term._clearLineWrite("(reverse-i-search)`"+searchTerm+"': ", text)
+            var prefix = "(reverse-i-search)"
+            if (failed) {
+                prefix = "(failed reverse-i-search)"
+            }
+            term._clearLineWrite(prefix+"`"+searchTerm+"': ", text)
         }
 
         if (this.first) {
@@ -19,6 +24,11 @@ module.exports = function() {
             case '\r':
             case '\u0003':
                 return true;
+            case '\u007F':
+                if (this.search.length > 0) {
+                    this.search = this.search.slice(0, -1);
+                }
+                break;
             case '\u0012':
                 if (term.history.length > 0) {
                     if (this.historyScrollPos < term.history.length) {                        
@@ -30,15 +40,16 @@ module.exports = function() {
                     this.search = this.search + input
                 }
 
+                failed = true
                 for (var i = this.historyScrollPos; i < term.history.length; i++) {
                     if (term.history[i].match(this.search)) {
                         this.historyScrollPos = i;
+                        failed = false
                         this.found = term.history[this.historyScrollPos];
                         break;
                     }
                 }
-
-                write(this.search, this.found);
         }
+        write(this.search, this.found);
     }
 }

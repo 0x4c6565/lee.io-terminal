@@ -41,7 +41,7 @@ module.exports = function() {
                 if (input.match(/^[a-zA-Z0-9]+$/)) {
                     this.search = this.search + input
                     this.historyScrollPos = 0;
-                }                
+                }
         }
         
         failed = true

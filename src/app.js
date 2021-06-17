@@ -151,6 +151,19 @@ function leeioTerminal() {
         }
     }
 
+    this._resolveCommand = function(command) {
+        if (command !== "") {                            
+            if (this.internalCommandCollection.commandExists(command)) {
+                return this.internalCommandCollection.getCommand(command);
+            }
+            if (this.commandCollection !== undefined && this.commandCollection.commandExists(command)) {
+                return this.commandCollection.getCommand(command);
+            }
+        }
+
+        return null
+    }
+
     this._commandOutputFunc = function() {
         return {
             stdOut: function(text) {
@@ -163,6 +176,43 @@ function leeioTerminal() {
                 this.lastExitCode = code
             }
         }
+    }
+
+    this._commandCollectionTabCompletion = function(collection) {
+        let inputBufferSplit = this.inputBuffer.split(' ')
+        let command = inputBufferSplit.shift();
+
+        console.log(inputBufferSplit.length)
+        if (command.length == 0 || inputBufferSplit.length >= 1) {
+            return true;
+        }
+
+        var commands = collection.getCommands();
+
+        var foundCommands = Object.keys(commands).filter(function (name) {
+            var re = new RegExp(`^${command}`);
+            return name.match(re)
+        });
+
+        if (foundCommands.length == 0) {
+            return false;
+        }
+
+        if (foundCommands.length == 1) {
+            this._prompt(foundCommands[0] + ' ')
+            return true;
+        }
+
+        term.write(foundCommands.join(' '))
+        this._prompt(this.inputBuffer);
+        return true;
+    }
+
+    this._tabCompletion = function() {
+        if (this._commandCollectionTabCompletion(this.internalCommandCollection)) {
+            return;
+        }
+        this._commandCollectionTabCompletion(this.commandCollection)
     }
 
     this.withCommandCollection = function(collection) {
@@ -197,16 +247,12 @@ function leeioTerminal() {
                         
                         let inputBufferSplit = this.inputBuffer.split(' ')
                         let command = inputBufferSplit.shift();
-                        
-                        if (command !== "") {
-                            
-                            if (this.internalCommandCollection.commandExists(command)) {
-                                this.internalCommandCollection.getCommand(command).execute(this._commandOutputFunc(), ...inputBufferSplit);
-                            } else if (this.commandCollection !== undefined && this.commandCollection.commandExists(command)) {
-                                this.commandCollection.getCommand(command).execute(this._commandOutputFunc(), ...inputBufferSplit);
-                            } else {
-                                term.write(`\r\n${command}: command not found`);
-                            }
+                        let resolvedCommand = this._resolveCommand(command);
+
+                        if (resolvedCommand != null) {
+                            resolvedCommand.execute(this._commandOutputFunc(), ...inputBufferSplit)
+                        } else {
+                            term.write(`\r\n${command}: command not found`);
                         }
                     }
                 case '\u0003': // Ctrl+C
@@ -236,6 +282,9 @@ function leeioTerminal() {
                     break;
                 case '\x1b[F': // End
                     this._setCursorEnd();
+                    break;
+                case '\t': // Tab
+                    this._tabCompletion();
                     break;
                 default:
                     for (var plugin in this.plugins) {
@@ -279,9 +328,9 @@ commandCollection.addCommand("about",
 
 commandCollection.addCommand("help", 
     new Command(function(cmd, name) {
-        if (name !== undefined) {
+        if (name !== undefined && name !== "") {
             if (!commandCollection.commandExists(name)) {
-                cmd.stdErr(`\r\nNo help entry for '${name != undefined ? name : ""}'`);
+                cmd.stdErr(`\r\nNo help entry for '${name}'`);
                 cmd.exit(1)
                 return;
             }

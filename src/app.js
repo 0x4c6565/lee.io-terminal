@@ -178,41 +178,36 @@ function leeioTerminal() {
         }
     }
 
-    this._commandCollectionTabCompletion = function(collection) {
+    this._commandsTabCompletion = function(commands) {
         let inputBufferSplit = this.inputBuffer.split(' ')
         let command = inputBufferSplit.shift();
 
-        console.log(inputBufferSplit.length)
-        if (command.length == 0 || inputBufferSplit.length >= 1) {
-            return true;
+        if (inputBufferSplit.length >= 1) {
+            return;
         }
 
-        var commands = collection.getCommands();
-
-        var foundCommands = Object.keys(commands).filter(function (name) {
+        var foundCommands = commands.filter(function (name) {
             var re = new RegExp(`^${command}`);
             return name.match(re)
         });
 
         if (foundCommands.length == 0) {
-            return false;
+            return;
         }
 
         if (foundCommands.length == 1) {
             this._prompt(foundCommands[0] + ' ')
-            return true;
+            return;
         }
 
-        term.write(foundCommands.join(' '))
-        this._prompt(this.inputBuffer);
-        return true;
+        term.write("\r\n"+foundCommands.join(' '))
+        this._newLinePrompt(this.inputBuffer);
     }
 
     this._tabCompletion = function() {
-        if (this._commandCollectionTabCompletion(this.internalCommandCollection)) {
-            return;
-        }
-        this._commandCollectionTabCompletion(this.commandCollection)
+        var keys = Object.keys(this.internalCommandCollection.getCommands());
+        keys = keys.concat(Object.keys(this.commandCollection.getCommands()));
+        this._commandsTabCompletion(keys)
     }
 
     this.withCommandCollection = function(collection) {
@@ -454,7 +449,6 @@ commandCollection.addCommand("tool",
                 "# Password generator - Opens password generator in new tab\r\nUsage: tool pw [--length <int>] [--nosymbols]\r\n\r\n"+
                 "# Converter - Opens converter in new tab\r\nUsage: tool convert")
 )
-
 
 var terminal = new leeioTerminal()
     .withCommandCollection(commandCollection)

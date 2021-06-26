@@ -27,8 +27,7 @@ window.onload = function() {
 function leeioTerminal() {    
     this.promptText = 'lee.io > ';
 
-    this.commandCollection = null;
-    this.internalCommandCollection = new CommandCollection();
+    this.commandCollections = [];
     this.inputBuffer = '';
     this.cursorX = 0;
     this.history = [];
@@ -152,12 +151,11 @@ function leeioTerminal() {
     }
 
     this._resolveCommand = function(command) {
-        if (command !== "") {                            
-            if (this.internalCommandCollection.commandExists(command)) {
-                return this.internalCommandCollection.getCommand(command);
-            }
-            if (this.commandCollection !== undefined && this.commandCollection.commandExists(command)) {
-                return this.commandCollection.getCommand(command);
+        if (command !== "") {
+            for (let i = 0; i < this.commandCollections.length; i++) {
+                if (this.commandCollections[i].commandExists(command)) {
+                    return this.commandCollections[i].getCommand(command);
+                }
             }
         }
 
@@ -178,40 +176,65 @@ function leeioTerminal() {
         }
     }
 
-    this._commandsTabCompletion = function(commands) {
-        let inputBufferSplit = this.inputBuffer.split(' ')
-        let command = inputBufferSplit.shift();
-
-        if (inputBufferSplit.length >= 1) {
-            return;
-        }
-
-        var foundCommands = commands.filter(function (name) {
-            var re = new RegExp(`^${command}`);
-            return name.match(re)
+    this._processTabCompletion = function(commands, input) {
+        var resolved = commands.filter(function (name) {
+            return name.startsWith(input)
         });
 
-        if (foundCommands.length == 0) {
+        if (resolved.length == 0) {
             return;
         }
 
-        if (foundCommands.length == 1) {
-            this._prompt(foundCommands[0] + ' ')
+        if (resolved.length == 1) {
+            var prefix = this.inputBuffer.substr(0, this.inputBuffer.lastIndexOf(" "));
+            if (prefix.length > 0) {
+                prefix = prefix + ' ';
+            }
+            this._prompt(prefix + resolved[0] + ' ')
             return;
         }
 
-        term.write("\r\n"+foundCommands.join(' '))
+        term.write("\r\n"+resolved.join(' '))
         this._newLinePrompt(this.inputBuffer);
     }
 
     this._tabCompletion = function() {
-        var keys = Object.keys(this.internalCommandCollection.getCommands());
-        keys = keys.concat(Object.keys(this.commandCollection.getCommands()));
-        this._commandsTabCompletion(keys)
+        let inputBufferSplit = this.inputBuffer.split(' ')
+        let command = inputBufferSplit.shift();
+
+        if (inputBufferSplit.length == 0) {
+            // Dealing with command (no args)
+
+            var commands = [];
+            this.commandCollections.forEach(commandCollection => {
+                commands = commands.concat(Object.keys(commandCollection.getCommands()));
+            });
+
+            return this._processTabCompletion(commands, command)
+        }
+
+        // Dealing with resolved command
+        var resolvedCommand = this._resolveCommand(command)
+        if (resolvedCommand != null) {
+            let completion = resolvedCommand.getCompletion();
+            if (completion === undefined) {
+                return;
+            }
+
+            var resolvedCompletion = completion;
+            for (let i = 0; i < inputBufferSplit.length-1; i++) {
+                resolvedCompletion = completion[inputBufferSplit[i]]
+            }
+
+            var commands = resolvedCompletion != undefined ? Object.keys(resolvedCompletion) : [];
+            var input = inputBufferSplit.length > 0 ? inputBufferSplit[inputBufferSplit.length-1] : "";
+
+            return this._processTabCompletion(commands, input)
+        }
     }
 
     this.withCommandCollection = function(collection) {
-        this.commandCollection = collection
+        this.commandCollections.push(collection);
         return this
     }
 
@@ -296,11 +319,13 @@ function leeioTerminal() {
             }
         });
 
-        this.internalCommandCollection.addCommand("clear", 
+        var internalCommandCollection = new CommandCollection();
+        internalCommandCollection.addCommand("clear", 
             new Command(function() {
                 term.reset();
             })
         );
+        this.commandCollections.unshift(internalCommandCollection)
 
         term.write('Type \x1B[34mhelp\x1B[0m for help');
         this._newLinePrompt();
@@ -434,6 +459,12 @@ commandCollection.addCommand("tool",
         }
 
         tools[name](name, args)
+    })
+    .withCompletion({
+        "geoip":{},
+        "some":{
+            "othercommand":{}
+        }     
     })
     .withSummary("Executes a tool. See help for more info")
     .withHelp(  "# GeoIP information - Retrieves GeoIP information for source or provided ip/host\r\nUsage: tool geoip <optional: ip/host>\r\n\r\n"+

@@ -177,8 +177,11 @@ function leeioTerminal() {
     }
 
     this._processTabCompletion = function(commands, input) {
-        var resolved = commands.filter(function (name) {
-            return name.startsWith(input)
+        var resolved = commands.filter(function (command) {
+            if (command.startsWith("-") && !input.startsWith("-")) {
+                return false;
+            }
+            return command.startsWith(input)
         });
 
         if (resolved.length == 0) {
@@ -462,9 +465,22 @@ commandCollection.addCommand("tool",
     })
     .withCompletion({
         "geoip":{},
-        "some":{
-            "othercommand":{}
-        }     
+        "ip":{},
+        "ipv4":{},
+        "ipv6":{},
+        "port":{},
+        "ssl":{},
+        "subnet":{},
+        "whois":{},
+        "mac":{},
+        "selfsigned":{},
+        "keypair":{},
+        "pastebin":{},
+        "pw":{
+            "--length":{},
+            "--nosymbols":{}
+        },
+        "convert":{}
     })
     .withSummary("Executes a tool. See help for more info")
     .withHelp(  "# GeoIP information - Retrieves GeoIP information for source or provided ip/host\r\nUsage: tool geoip <optional: ip/host>\r\n\r\n"+

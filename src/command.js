@@ -6,6 +6,11 @@ module.exports = function(func) {
         return this
     }
 
+    this.withCompletion = function(completion) {
+        this.completion = completion
+        return this
+    }
+
     this.withSummary = function(summary) {
         this.summary = summary
         return this
@@ -19,6 +24,10 @@ module.exports = function(func) {
     this.withHidden = function() {
         this.hidden = true
         return this
+    }
+
+    this.getCompletion = function() {
+        return this.completion
     }
 
     this.getHelp = function() {

@@ -23,6 +23,9 @@ term.element.children[0].style.overflowY = 'auto'
 window.onload = function() {
     fitAddon.fit();
 }
+window.onresize = function() {
+    fitAddon.fit();
+}
 
 function leeioTerminal() {    
     this.promptText = 'lee.io > ';

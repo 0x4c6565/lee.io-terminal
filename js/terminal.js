@@ -200,6 +200,7 @@ function Terminal(terminal) {
             let argsParsed = parseArg(args ? args.join(' ') : "")
             if (argsParsed.c === true) {
                 outer.history = [];
+                return 0;
             }
             
             cmd.stdOut(outer.history.reverse().join("\n") + "\n");

@@ -12,16 +12,16 @@ let toolCommand = new Command(async function(cmd, name, ...args) {
     async function doRequest(uri, decorateOutput=false) {
         try {
             let response = await fetch(uri);
+            let responseText = await response.text().trim();
             if (response.ok) {
                 let padding = '';
                 if (decorateOutput == true) {
                     padding = "\n";
                 }
-                let responseText = await response.text();
-                cmd.stdOut(`${padding}${responseText.trim().replace(/\n/g, "\n")}${padding}\n`);
+                cmd.stdOut(`${padding}${responseText}${padding}\n`);
                 return 0;
             } else {
-                cmd.stdErr(`Upstream error: ${response.text()}\n`)
+                cmd.stdErr(`Upstream error: ${responseText}\n`)
                 return 1;
             }
         } catch (e) {
@@ -37,9 +37,9 @@ let toolCommand = new Command(async function(cmd, name, ...args) {
 
     let tools = {
         "geoip": executeTool,
-        "ip": function() { doRequest("https://ip.lee.io") },
-        "ipv4": function() { doRequest("https://ipv4.lee.io") },
-        "ipv6": function() { doRequest("https://ipv6.lee.io") },
+        "ip": async function() { await doRequest("https://ip.lee.io") },
+        "ipv4": async function() { await doRequest("https://ipv4.lee.io") },
+        "ipv6": async function() { await doRequest("https://ipv6.lee.io") },
         "port": executeTool,
         "ssl": executeTool,
         "subnet": executeTool,

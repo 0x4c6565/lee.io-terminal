@@ -2,14 +2,8 @@
 
 Here be the code for lee.io
 
-### Building
+### Running
 
 ```
-make
-```
-
-### Running (dev)
-
-```
-make start
+docker-compose up
 ```

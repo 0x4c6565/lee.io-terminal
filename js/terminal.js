@@ -202,7 +202,7 @@ function Terminal(terminal) {
                 outer.history = [];
             }
             
-            cmd.stdOut(outer.history.join("\n") + "\n");
+            cmd.stdOut(outer.history.reverse().join("\n") + "\n");
             return 0;
         }).withHidden())
             

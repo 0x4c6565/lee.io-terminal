@@ -12,13 +12,13 @@ let toolCommand = new Command(async function(cmd, name, ...args) {
     async function doRequest(uri, decorateOutput=false) {
         try {
             let response = await fetch(uri);
-            let responseText = await response.text().trim();
+            let responseText = await response.text();
             if (response.ok) {
                 let padding = '';
                 if (decorateOutput == true) {
                     padding = "\n";
                 }
-                cmd.stdOut(`${padding}${responseText}${padding}\n`);
+                cmd.stdOut(`${padding}${responseText.trim()}${padding}\n`);
                 return 0;
             } else {
                 cmd.stdErr(`Upstream error: ${responseText}\n`)

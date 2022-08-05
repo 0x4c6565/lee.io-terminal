@@ -17,14 +17,15 @@ let toolCommand = new Command(async function(cmd, name, ...args) {
                 if (decorateOutput == true) {
                     padding = "\n";
                 }
-                cmd.stdOut(`${padding}\n${response.text().trim().replace(/\n/g, "\n")}${padding}\n`);
+                let responseText = await response.text();
+                cmd.stdOut(`${padding}${responseText.trim().replace(/\n/g, "\n")}${padding}\n`);
                 return 0;
             } else {
                 cmd.stdErr(`Upstream error: ${response.text()}\n`)
                 return 1;
             }
         } catch (e) {
-            cmd.stdErr("Error: " + e)
+            cmd.stdErr(`Error: ${e}\n`)
             return 1;
         }
     }

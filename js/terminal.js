@@ -238,7 +238,7 @@ function Terminal(terminal) {
         this._initInternalCommands();
 
         let outer = this;
-        document.addEventListener('keydown', async function (e) {
+        this.terminal.addEventListener('keydown', async function (e) {
             e.preventDefault();
             switch (true) {
                 case (e.key == "Enter"):
@@ -298,6 +298,7 @@ function Terminal(terminal) {
             }
         });
 
+        this.terminal.focus();
         this.output = `Type 'help' for help\n`
         this._prompt();
     }

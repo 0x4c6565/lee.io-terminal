@@ -40,10 +40,16 @@ body {
     line-height: 18px;
     vertical-align: middle;
     overflow: scroll;
+    outline: none;
 }
 
-#terminal .cursor {
+#terminal:focus .cursor {
     background-color: #FFFFFF;
     color: #1E1E1E;
     display: inline-block;
+    box-shadow: none;
+}
+
+#terminal .cursor {
+    box-shadow: inset 0px 0px 0px 1px #FFFFFF;
 }

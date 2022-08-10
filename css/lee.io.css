@@ -39,7 +39,7 @@ body {
     font-family: "Courier New";
     line-height: 18px;
     vertical-align: middle;
-    overflow: scroll;
+    overflow: auto;
     outline: none;
 }
 
@@ -52,4 +52,6 @@ body {
 
 #terminal .cursor {
     box-shadow: inset 0px 0px 0px 1px #FFFFFF;
+    position: relative;
+    top: -1px;
 }

@@ -40,24 +40,38 @@ class Renderer {
     }
 
     /**
+     * Keep viewport pinned to the latest terminal output
+     */
+    scrollToBottom() {
+        this.terminal.scrollTop = this.terminal.scrollHeight - this.terminal.clientHeight;
+    }
+
+    /**
+     * Render only output text without touching the editable input row
+     * @param {string} output - Current output text
+     */
+    renderOutput(output) {
+        this.outputNode.textContent = output;
+        this.scrollToBottom();
+    }
+
+    /**
      * Render the current terminal state
      * @param {string} output - Current output text
      * @param {string} inputBuffer - Current input buffer
      * @param {number} cursorX - Current cursor position
      */
-    render(output, inputBuffer, cursorX) {
+    render(output, inputBuffer, cursorX, promptPrefix = this.promptPrefix) {
         const inputBefore = inputBuffer.substring(0, cursorX);
         const inputAtCursor = (inputBuffer.length > cursorX) ? inputBuffer.charAt(cursorX) : " ";
         const inputAfter = (inputBuffer.length > cursorX) ? inputBuffer.substring(cursorX + 1) : "";
 
-        this.outputNode.textContent = output;
-        this.promptNode.nodeValue = this.promptPrefix;
+        this.renderOutput(output);
+        this.promptNode.nodeValue = promptPrefix;
         this.inputBeforeNode.nodeValue = inputBefore;
         this.cursorNode.textContent = inputAtCursor;
         this.inputAfterNode.nodeValue = inputAfter;
-
-        // Auto-scroll to bottom
-        this.terminal.scrollTop = this.terminal.scrollHeight - this.terminal.clientHeight;
+        this.scrollToBottom();
     }
 
     /**
@@ -197,7 +211,7 @@ class KeyboardHandler {
 
         try {
             if (e.key === "Enter") {
-                await this.terminal.executeCommand();
+                await this.terminal.submitCurrentInput();
             } else if (e.key === "c" && e.ctrlKey) {
                 this.terminal.interrupt();
             } else if (e.key === "Backspace") {
@@ -237,7 +251,7 @@ class Command {
         this.func = func;
         this.summary = '';
         this.help = '';
-        this.hidden = false;
+        this.internal = false;
     }
 
     /**
@@ -271,11 +285,11 @@ class Command {
     }
 
     /**
-     * Mark command as hidden from help
+     * Mark command as internal
      * @returns {Command} This instance for chaining
      */
-    markHidden() {
-        this.hidden = true;
+    markInternal() {
+        this.internal = true;
         return this;
     }
 
@@ -296,11 +310,11 @@ class Command {
     }
 
     /**
-     * Check if command is hidden
-     * @returns {boolean} Whether the command is hidden
+     * Check if command is internal
+     * @returns {boolean} Whether the command is internal
      */
-    isHidden() {
-        return this.hidden;
+    isInternal() {
+        return this.internal;
     }
 
     /**
@@ -338,6 +352,9 @@ class Terminal {
         this.historyScrollPos = 0;
         this.historyLimit = 100;
         this.commands = {};
+        this.variables = {};
+        this.commandQueue = [];
+        this.isExecutingCommand = false;
         this.lastExitCode = 0;
     }
 
@@ -466,11 +483,21 @@ class Terminal {
     }
 
     /**
+     * Reset history scroll position
+     * @private
+     */
+    _resetHistoryScrollPos() {
+        this.historyScrollPos = 0;
+    }
+
+    /**
      * Show the prompt
      */
-    showPrompt() {
-        this.historyScrollPos = 0;
-        this.inputBuffer.reset();
+    showPrompt(resetInput = true) {
+        this._resetHistoryScrollPos();
+        if (resetInput) {
+            this.inputBuffer.reset();
+        }
         this.render();
     }
 
@@ -482,51 +509,166 @@ class Terminal {
         return {
             stdOut: (text) => {
                 this.output += text;
-                this.render();
+                this.renderer.renderOutput(this.output);
             },
             stdErr: (text) => {
                 this.output += text;
-                this.render();
+                this.renderer.renderOutput(this.output);
             }
+        };
+    }
+
+    /**
+     * Expand built-in shell-like variables in raw input
+     * @param {string} input - Raw command input
+     * @returns {string} Input with variables expanded
+     */
+    expandVariables(input = "") {
+        const withExitCode = input.replace(/\$\?/g, String(this.lastExitCode));
+        return withExitCode.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, bracedName, simpleName) => {
+            const name = bracedName || simpleName;
+            return this.variables[name] ?? "";
+        });
+    }
+
+    /**
+     * Parse assignment token in NAME=value form
+     * @param {string} token - Token to parse
+     * @returns {{name: string, value: string}|undefined} Parsed assignment or undefined
+     */
+    parseAssignmentToken(token) {
+        const match = token.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+        if (!match) {
+            return undefined;
+        }
+
+        return {
+            name: match[1],
+            value: match[2]
         };
     }
 
     /**
      * Execute the current input as a command
      */
-    async executeCommand() {
-        const inputBuffer = this.inputBuffer.getContent();
-        this.output += this.renderer.promptPrefix + inputBuffer + "\n";
-
-        if (inputBuffer.length > 0) {
-            // Add to history
-            if (this.history.length >= this.historyLimit) {
-                this.history.pop();
-            }
-            this.history.unshift(inputBuffer);
-
-            // Parse command and arguments
-            const parts = inputBuffer.split(' ');
-            const commandName = parts.shift();
-
-            this.render();
-
-            try {
-                if (this.commandExists(commandName)) {
-                    const command = this.getCommand(commandName);
-                    this.lastExitCode = await command.execute(this.createCommandOutput(), ...parts);
-                } else {
-                    this.output += `${commandName}: command not found\n`;
-                    this.render();
-                }
-            } catch (error) {
-                console.error('Command execution error:', error);
-                this.output += `Error: ${error.message}\n`;
-                this.render();
-            }
+    async runCommandLine(inputLine, echoPrompt = true) {
+        if (inputLine.length === 0) {
+            this.lastExitCode = 0;
+            return;
         }
 
-        this.showPrompt();
+        // Echo command only when it actually starts executing, unless it
+        // was already displayed when queued while another command was running.
+        if (echoPrompt) {
+            this.output += this.renderer.promptPrefix + inputLine + "\n";
+            this.renderer.renderOutput(this.output);
+        }
+
+        // Parse command and arguments
+        const expandedInput = this.expandVariables(inputLine);
+        const parts = expandedInput.trim().split(/\s+/).filter(Boolean);
+
+        // Process leading NAME=value assignments
+        while (parts.length > 0) {
+            const assignment = this.parseAssignmentToken(parts[0]);
+            if (!assignment) {
+                break;
+            }
+
+            this.variables[assignment.name] = assignment.value;
+            parts.shift();
+        }
+
+        // Assignment-only input succeeds without running a command
+        if (parts.length === 0) {
+            this.lastExitCode = 0;
+            return;
+        }
+
+        const commandName = parts.shift();
+
+        try {
+            if (this.commandExists(commandName)) {
+                const command = this.getCommand(commandName);
+                this.lastExitCode = await command.execute(this.createCommandOutput(), ...parts);
+            } else {
+                this.output += `${commandName}: command not found\n`;
+                this.lastExitCode = 127;
+                this.renderer.renderOutput(this.output);
+            }
+        } catch (error) {
+            console.error('Command execution error:', error);
+            this.output += `Error: ${error.message}\n`;
+            this.lastExitCode = 1;
+            this.renderer.renderOutput(this.output);
+        }
+    }
+
+    /**
+     * Execute queued commands one at a time
+     */
+    async drainCommandQueue() {
+        if (this.isExecutingCommand) {
+            return;
+        }
+
+        this.isExecutingCommand = true;
+        try {
+            while (this.commandQueue.length > 0) {
+                const queued = this.commandQueue.shift();
+                await this.runCommandLine(queued.line, queued.echoPrompt);
+            }
+        } finally {
+            this.isExecutingCommand = false;
+            this.showPrompt(false);
+        }
+    }
+
+    /**
+     * Submit current input line and enqueue for execution
+     */
+    async submitCurrentInput() {
+        const inputLine = this.inputBuffer.getContent();
+
+        // Match shell behavior for empty Enter.
+        if (inputLine.length === 0) {
+            // While a command is running, ignore empty Enter to avoid
+            // injecting visual blank lines.
+            if (this.isExecutingCommand) {
+                return;
+            }
+
+            // Commit an empty prompt line (not a bare newline) so the next
+            // prompt appears on the immediate next line without extra spacing.
+            this.output += this.renderer.promptPrefix + "\n";
+            this._resetHistoryScrollPos();
+            this.inputBuffer.reset();
+            this.render();
+            return;
+        }
+
+        if (this.history.length >= this.historyLimit) {
+            this.history.pop();
+        }
+        this.history.unshift(inputLine);
+
+        const queuedWhileExecuting = this.isExecutingCommand;
+        if (queuedWhileExecuting) {
+            // Preserve visibility of queued input without drawing a fake prompt.
+            this.output += inputLine + "\n";
+            this.renderer.renderOutput(this.output);
+        }
+
+        this.commandQueue.push({ line: inputLine, echoPrompt: true });
+
+        this._resetHistoryScrollPos();
+        this.inputBuffer.reset();
+
+        // Keep cursor on the next line immediately after pressing Enter
+        // without showing the next prompt before command output starts.
+        this.render("");
+
+        await this.drainCommandQueue();
     }
 
     /**
@@ -535,17 +677,34 @@ class Terminal {
     interrupt() {
         const inputBuffer = this.inputBuffer.getContent();
         this.output += this.renderer.promptPrefix + inputBuffer + "\n";
-        this.showPrompt();
+        this.showPrompt(true);
+    }
+
+    /**
+     * Get the active prompt prefix for rendering
+     * @private
+     * @param {string|undefined} override - Optional prompt override
+     * @returns {string} Prompt prefix to render
+     */
+    _getPromptPrefix(override) {
+        if (override !== undefined) {
+            return override;
+        }
+
+        return this.isExecutingCommand ? "" : this.renderer.promptPrefix;
     }
 
     /**
      * Render the terminal
      */
-    render() {
+    render(promptPrefixOverride = undefined) {
+        const promptPrefix = this._getPromptPrefix(promptPrefixOverride);
+
         this.renderer.render(
             this.output,
             this.inputBuffer.getContent(),
-            this.inputBuffer.getCursorX()
+            this.inputBuffer.getCursorX(),
+            promptPrefix
         );
     }
 
@@ -553,8 +712,26 @@ class Terminal {
      * Initialize internal commands
      */
     initializeInternalCommands() {
-        this.withCommand("help", new Command(async (cmd, name) => {
+        this.withCommand("help", new Command(async (cmd, ...args) => {
             try {
+                let showInternal = false;
+                let name = undefined;
+
+                for (const arg of args) {
+                    if (arg === "-i" || arg === "--internal") {
+                        showInternal = true;
+                        continue;
+                    }
+
+                    if (name === undefined || name === "") {
+                        name = arg;
+                        continue;
+                    }
+
+                    cmd.stdErr("Usage: help [-i|--internal] [command]\n");
+                    return 1;
+                }
+
                 if (name !== undefined && name !== "") {
                     if (!this.commandExists(name)) {
                         cmd.stdErr(`No help entry for '${name}'\n`);
@@ -575,10 +752,13 @@ class Terminal {
                 let output = "Commands:\n";
                 for (const commandName in commands) {
                     const command = this.getCommand(commandName);
-                    if (!command.isHidden()) {
-                        const summary = command.getSummary();
-                        output += `\n${commandName.padEnd(maxLength, ' ')} : ${summary || "N/A"}`;
+                    if (!showInternal && command.isInternal()) {
+                        continue;
                     }
+
+                    const summary = command.getSummary();
+                    const internalTag = command.isInternal() ? " [internal]" : "";
+                    output += `\n${commandName.padEnd(maxLength, ' ')} : ${summary || "N/A"}${internalTag}`;
                 }
 
                 cmd.stdOut(output + "\n");
@@ -588,8 +768,94 @@ class Terminal {
                 cmd.stdErr(`Error: ${error.message}\n`);
                 return 1;
             }
-        }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
-          .withHelp("Shows all available commands or detailed help for a specific command.\n\nUsage: help [command]"));
+                }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
+                    .withHelp("Shows all user-facing commands or detailed help for a specific command.\nUse -i or --internal to include internal commands in the list.\n\nUsage: help [-i|--internal] [command]"));
+
+        this.withCommand("echo", new Command(async (cmd, ...args) => {
+            const suppressNewline = args[0] === "-n";
+            const output = suppressNewline ? args.slice(1).join(' ') : args.join(' ');
+            cmd.stdOut(output + (suppressNewline ? '' : "\n"));
+            return 0;
+        }).withSummary("Displays a line of text")
+            .withHelp("Prints its arguments to standard output.\n\nUsage: echo [-n] [text ...]")
+            .markInternal());
+
+        this.withCommand("date", new Command(async (cmd, ...args) => {
+            const options = parseArg(args ? args.join(' ') : "");
+            const now = new Date();
+            cmd.stdOut((options.u === true || options.utc === true ? now.toUTCString() : now.toString()) + "\n");
+            return 0;
+        }).withSummary("Displays the current date and time")
+            .withHelp("Prints the current date and time.\n\nUsage: date [-u|--utc]")
+            .markInternal());
+
+        this.withCommand("whoami", new Command(async (cmd) => {
+            cmd.stdOut("lee\n");
+            return 0;
+        }).withSummary("Displays the current user")
+            .withHelp("Prints the current username.\n\nUsage: whoami")
+            .markInternal());
+
+        this.withCommand("uname", new Command(async (cmd, ...args) => {
+            const options = parseArg(args ? args.join(' ') : "");
+            const platform = window.navigator.platform || "unknown";
+            const appVersion = window.navigator.appVersion || "unknown";
+
+            if (options.a === true) {
+                cmd.stdOut(`lee.io ${platform} ${appVersion}\n`);
+                return 0;
+            }
+
+            cmd.stdOut("lee.io\n");
+            return 0;
+        }).withSummary("Displays system information")
+            .withHelp("Prints basic system information.\n\nUsage: uname [-a]")
+            .markInternal());
+
+        this.withCommand("which", new Command(async (cmd, ...args) => {
+            if (args.length === 0) {
+                cmd.stdErr("Usage: which <command> [command ...]\n");
+                return 1;
+            }
+
+            let exitCode = 0;
+            for (const name of args) {
+                if (this.commandExists(name)) {
+                    cmd.stdOut(`${name}\n`);
+                } else {
+                    cmd.stdErr(`${name} not found\n`);
+                    exitCode = 1;
+                }
+            }
+
+            return exitCode;
+        }).withSummary("Locates a command")
+            .withHelp("Displays whether a command exists in this terminal.\n\nUsage: which <command> [command ...]")
+            .markInternal());
+
+        this.withCommand("set", new Command(async (cmd) => {
+                const variableNames = Object.keys(this.variables).sort();
+                const output = variableNames.map((name) => `${name}=${this.variables[name]}`).join("\n");
+                cmd.stdOut((output ? output + "\n" : ""));
+                return 0;
+        }).withSummary("Displays shell variables")
+            .withHelp("Prints all shell variables.\n\nUsage: set")
+            .markInternal());
+
+        this.withCommand("unset", new Command(async (cmd, ...args) => {
+                if (args.length === 0) {
+                        cmd.stdErr("Usage: unset <name> [name ...]\n");
+                        return 1;
+                }
+
+                for (const name of args) {
+                        delete this.variables[name];
+                }
+
+                return 0;
+        }).withSummary("Unsets shell variables")
+            .withHelp("Removes one or more shell variables.\n\nUsage: unset <name> [name ...]")
+            .markInternal());
 
         this.withCommand("history", new Command(async (cmd, ...args) => {
             try {
@@ -606,13 +872,17 @@ class Terminal {
                 cmd.stdErr(`Error: ${error.message}\n`);
                 return 1;
             }
-        }).markHidden());
+        }).withSummary("Shows previously entered commands")
+            .withHelp("Displays command history in chronological order.\nUse -c to clear the history.\n\nUsage: history [-c]")
+            .markInternal());
 
         this.withCommand("clear", new Command(async () => {
             this.output = '';
             this.render();
             return 0;
-        }).markHidden());
+        }).withSummary("Clears the terminal output")
+            .withHelp("Clears all visible terminal output and redraws the prompt.\n\nUsage: clear")
+            .markInternal());
     }
 
     /**

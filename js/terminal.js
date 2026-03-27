@@ -338,6 +338,7 @@ class Terminal {
         this.historyScrollPos = 0;
         this.historyLimit = 100;
         this.commands = {};
+        this.variables = {};
         this.lastExitCode = 0;
     }
 
@@ -492,6 +493,36 @@ class Terminal {
     }
 
     /**
+     * Expand built-in shell-like variables in raw input
+     * @param {string} input - Raw command input
+     * @returns {string} Input with variables expanded
+     */
+    expandVariables(input = "") {
+        const withExitCode = input.replace(/\$\?/g, String(this.lastExitCode));
+        return withExitCode.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, bracedName, simpleName) => {
+            const name = bracedName || simpleName;
+            return this.variables[name] ?? "";
+        });
+    }
+
+    /**
+     * Parse assignment token in NAME=value form
+     * @param {string} token - Token to parse
+     * @returns {{name: string, value: string}|undefined} Parsed assignment or undefined
+     */
+    parseAssignmentToken(token) {
+        const match = token.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+        if (!match) {
+            return undefined;
+        }
+
+        return {
+            name: match[1],
+            value: match[2]
+        };
+    }
+
+    /**
      * Execute the current input as a command
      */
     async executeCommand() {
@@ -506,7 +537,27 @@ class Terminal {
             this.history.unshift(inputBuffer);
 
             // Parse command and arguments
-            const parts = inputBuffer.split(' ');
+            const expandedInput = this.expandVariables(inputBuffer);
+            const parts = expandedInput.trim().split(/\s+/).filter(Boolean);
+
+            // Process leading NAME=value assignments
+            while (parts.length > 0) {
+                const assignment = this.parseAssignmentToken(parts[0]);
+                if (!assignment) {
+                    break;
+                }
+
+                this.variables[assignment.name] = assignment.value;
+                parts.shift();
+            }
+
+            // Assignment-only input succeeds without running a command
+            if (parts.length === 0) {
+                this.lastExitCode = 0;
+                this.showPrompt();
+                return;
+            }
+
             const commandName = parts.shift();
 
             this.render();
@@ -517,11 +568,13 @@ class Terminal {
                     this.lastExitCode = await command.execute(this.createCommandOutput(), ...parts);
                 } else {
                     this.output += `${commandName}: command not found\n`;
+                    this.lastExitCode = 127;
                     this.render();
                 }
             } catch (error) {
                 console.error('Command execution error:', error);
                 this.output += `Error: ${error.message}\n`;
+                this.lastExitCode = 1;
                 this.render();
             }
         }
@@ -590,6 +643,92 @@ class Terminal {
             }
         }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
           .withHelp("Shows all available commands or detailed help for a specific command.\n\nUsage: help [command]"));
+
+        this.withCommand("echo", new Command(async (cmd, ...args) => {
+            const suppressNewline = args[0] === "-n";
+            const output = suppressNewline ? args.slice(1).join(' ') : args.join(' ');
+            cmd.stdOut(output + (suppressNewline ? '' : "\n"));
+            return 0;
+        }).withSummary("Displays a line of text")
+            .withHelp("Prints its arguments to standard output.\n\nUsage: echo [-n] [text ...]")
+            .markHidden());
+
+        this.withCommand("date", new Command(async (cmd, ...args) => {
+            const options = parseArg(args ? args.join(' ') : "");
+            const now = new Date();
+            cmd.stdOut((options.u === true || options.utc === true ? now.toUTCString() : now.toString()) + "\n");
+            return 0;
+        }).withSummary("Displays the current date and time")
+            .withHelp("Prints the current date and time.\n\nUsage: date [-u|--utc]")
+            .markHidden());
+
+        this.withCommand("whoami", new Command(async (cmd) => {
+            cmd.stdOut("lee\n");
+            return 0;
+        }).withSummary("Displays the current user")
+            .withHelp("Prints the current username.\n\nUsage: whoami")
+            .markHidden());
+
+        this.withCommand("uname", new Command(async (cmd, ...args) => {
+            const options = parseArg(args ? args.join(' ') : "");
+            const platform = window.navigator.platform || "unknown";
+            const appVersion = window.navigator.appVersion || "unknown";
+
+            if (options.a === true) {
+                cmd.stdOut(`lee.io ${platform} ${appVersion}\n`);
+                return 0;
+            }
+
+            cmd.stdOut("lee.io\n");
+            return 0;
+        }).withSummary("Displays system information")
+            .withHelp("Prints basic system information.\n\nUsage: uname [-a]")
+            .markHidden());
+
+        this.withCommand("which", new Command(async (cmd, ...args) => {
+            if (args.length === 0) {
+                cmd.stdErr("Usage: which <command> [command ...]\n");
+                return 1;
+            }
+
+            let exitCode = 0;
+            for (const name of args) {
+                if (this.commandExists(name)) {
+                    cmd.stdOut(`${name}\n`);
+                } else {
+                    cmd.stdErr(`${name} not found\n`);
+                    exitCode = 1;
+                }
+            }
+
+            return exitCode;
+        }).withSummary("Locates a command")
+            .withHelp("Displays whether a command exists in this terminal.\n\nUsage: which <command> [command ...]")
+            .markHidden());
+
+        this.withCommand("set", new Command(async (cmd) => {
+                const variableNames = Object.keys(this.variables).sort();
+                const output = variableNames.map((name) => `${name}=${this.variables[name]}`).join("\n");
+                cmd.stdOut((output ? output + "\n" : ""));
+                return 0;
+        }).withSummary("Displays shell variables")
+            .withHelp("Prints all shell variables.\n\nUsage: set")
+            .markHidden());
+
+        this.withCommand("unset", new Command(async (cmd, ...args) => {
+                if (args.length === 0) {
+                        cmd.stdErr("Usage: unset <name> [name ...]\n");
+                        return 1;
+                }
+
+                for (const name of args) {
+                        delete this.variables[name];
+                }
+
+                return 0;
+        }).withSummary("Unsets shell variables")
+            .withHelp("Removes one or more shell variables.\n\nUsage: unset <name> [name ...]")
+            .markHidden());
 
         this.withCommand("history", new Command(async (cmd, ...args) => {
             try {

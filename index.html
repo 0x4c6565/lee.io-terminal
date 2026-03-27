@@ -1,18 +1,23 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 
 <head>
-    <link rel="stylesheet" href="css/normalize.css" />
-    <link rel="stylesheet" href="css/lee.io.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="lee.io - A web-based terminal interface with utilities and tools">
+    <meta name="theme-color" content="#2E2E2E">
+    <title>lee.io Terminal</title>
+    <link rel="stylesheet" href="css/normalize.css">
+    <link rel="stylesheet" href="css/lee.io.css">
 </head>
 
 <body>
-    <div class="flex">
-        <div class="box">
+    <main class="flex">
+        <article class="box">
             <div class="title-bar">lee.io</div>
-            <div id="terminal" tabindex="0"></div>
-        </div>
-    </div>
+            <section id="terminal" role="application" aria-label="Terminal emulator" tabindex="0"></section>
+        </article>
+    </main>
 
     <script src="js/terminal.js"></script>
     <script src="js/lee.io.js"></script>

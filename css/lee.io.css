@@ -33,7 +33,8 @@ body {
 #terminal {
     background: #1E1E1E;
     height: 100%;
-    word-break: break-all;
+    word-break: normal;
+    overflow-wrap: anywhere;
     white-space: pre-wrap;
     padding: 10px;
     font-family: "Courier New";
@@ -47,11 +48,14 @@ body {
     background-color: #FFFFFF;
     color: #1E1E1E;
     display: inline-block;
+    width: 1ch;
+    line-height: inherit;
     box-shadow: none;
 }
 
 #terminal .cursor {
     box-shadow: inset 0px 0px 0px 1px #FFFFFF;
-    position: relative;
-    top: -1px;
+    display: inline-block;
+    width: 1ch;
+    line-height: inherit;
 }

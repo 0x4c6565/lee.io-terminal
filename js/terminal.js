@@ -3,7 +3,13 @@ function Terminal(terminal) {
     this.output = '';
     this.inputBuffer = '';
     this.cursorX = 0;
-    this.promptPrefix = 'lee.io > ';
+    this.promptPrefix = 'lee.io\u00A0>\u00A0';
+    this.outputNode = null;
+    this.inputNode = null;
+    this.promptNode = null;
+    this.inputBeforeNode = null;
+    this.cursorNode = null;
+    this.inputAfterNode = null;
     
     this.history = [];
     this.historyScrollPos = 0;
@@ -28,18 +34,20 @@ function Terminal(terminal) {
     };
 
     this._flushOutput = function() {
-        let outputBuffer = this._escapeHTML(this.output.substr(0, (this.output.length - this.inputBuffer.length) + this.cursorX))
-                           + `<span class="cursor">${this._escapeHTML((this.inputBuffer.length > this.cursorX) ? this.output.charAt((this.output.length - this.inputBuffer.length) + this.cursorX) : " ")}</span>`
-                           + this._escapeHTML(this.output.substr((this.output.length - this.inputBuffer.length) + this.cursorX+1))
+        let inputBefore = this.inputBuffer.substr(0, this.cursorX);
+        let inputAtCursor = (this.inputBuffer.length > this.cursorX) ? this.inputBuffer.charAt(this.cursorX) : " ";
+        let inputAfter = (this.inputBuffer.length > this.cursorX) ? this.inputBuffer.substr(this.cursorX + 1) : "";
 
-        this.terminal.innerHTML = outputBuffer;
+        this.outputNode.textContent = this.output;
+        this.promptNode.nodeValue = this.promptPrefix;
+        this.inputBeforeNode.nodeValue = inputBefore;
+        this.cursorNode.textContent = inputAtCursor;
+        this.inputAfterNode.nodeValue = inputAfter;
         this.terminal.scrollTop = this.terminal.scrollHeight - this.terminal.clientHeight
     }
 
     this._clearInputBuffer = function() {
-        if (this.output.length >= this.inputBuffer.length) {
-            this.output = this.output.substr(0, (this.output.length - this.inputBuffer.length))
-        }
+        return;
     }
 
     this._newInputBuffer = function() {
@@ -54,36 +62,30 @@ function Terminal(terminal) {
     }
     
     this._writeInputAtCursor = function(text='') {
-        this._clearInputBuffer();
-
         let cursorSuffix = this.inputBuffer.substr(this.cursorX);
         this.inputBuffer = this.inputBuffer.substr(0, this.cursorX) + text + cursorSuffix;
         this.cursorX = this.cursorX+text.length;
-
-        this.output = this.output + this.inputBuffer;
         this._flushOutput();
     }
     
     this._deleteInputBeforeCursor = function() {
-        this._clearInputBuffer();
+        if (this.cursorX === 0) {
+            return;
+        }
 
         let cursorSuffix = this.inputBuffer.substr(this.cursorX);
         this.inputBuffer = this.inputBuffer.substr(0, this.cursorX-1) + cursorSuffix;
-        if (this.cursorX > 0) {
-            this.cursorX--;
-        }
-
-        this.output = this.output + this.inputBuffer;
+        this.cursorX--;
         this._flushOutput();
     }
     
     this._deleteInputAtCursor = function() {
-        this._clearInputBuffer();
+        if (this.cursorX >= this.inputBuffer.length) {
+            return;
+        }
 
         let cursorSuffix = this.inputBuffer.substr(this.cursorX+1);
         this.inputBuffer = this.inputBuffer.substr(0, this.cursorX) + cursorSuffix;
-
-        this.output = this.output + this.inputBuffer;
         this._flushOutput();
     }
 
@@ -127,12 +129,13 @@ function Terminal(terminal) {
             this.historyScrollPos--;
 
             this._resetInputBuffer();
-            this._writeInputAtCursor(this.history[this.historyScrollPos-1])
+            if (this.historyScrollPos > 0) {
+                this._writeInputAtCursor(this.history[this.historyScrollPos-1])
+            }
         }
     }
 
     this._prompt = function() {
-        this.output = this.output + this.promptPrefix
         this.historyScrollPos = 0;
         this._newInputBuffer();
     }
@@ -214,7 +217,7 @@ function Terminal(terminal) {
     }
 
     this._commandOutputFunc = function() {
-        outer = this;
+        let outer = this;
         return {
             stdOut: function(text) {
                 outer.output = outer.output + text
@@ -237,12 +240,27 @@ function Terminal(terminal) {
     this.run = function() {
         this._initInternalCommands();
 
+        this.terminal.textContent = "";
+        this.outputNode = document.createElement("span");
+        this.inputNode = document.createElement("span");
+        this.promptNode = document.createTextNode("");
+        this.inputBeforeNode = document.createTextNode("");
+        this.cursorNode = document.createElement("span");
+        this.cursorNode.className = "cursor";
+        this.inputAfterNode = document.createTextNode("");
+        this.inputNode.appendChild(this.promptNode);
+        this.inputNode.appendChild(this.inputBeforeNode);
+        this.inputNode.appendChild(this.cursorNode);
+        this.inputNode.appendChild(this.inputAfterNode);
+        this.terminal.appendChild(this.outputNode);
+        this.terminal.appendChild(this.inputNode);
+
         let outer = this;
         this.terminal.addEventListener('keydown', async function (e) {
             e.preventDefault();
             switch (true) {
                 case (e.key == "Enter"):
-                    outer.output = outer.output + "\n"
+                    outer.output = outer.output + outer.promptPrefix + outer.inputBuffer + "\n"
                     if (outer.inputBuffer.length > 0) {
                         if (outer.history.length > outer.historyLimit) {
                             outer.history.pop()
@@ -264,7 +282,7 @@ function Terminal(terminal) {
                     outer._prompt();
                     break;
                 case (e.key == "c" && e.ctrlKey):
-                    outer.output = outer.output + "\n"
+                    outer.output = outer.output + outer.promptPrefix + outer.inputBuffer + "\n"
                     outer._prompt();
                     break;
                 case (e.key == "Backspace"):

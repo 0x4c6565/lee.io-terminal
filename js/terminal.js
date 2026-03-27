@@ -251,7 +251,7 @@ class Command {
         this.func = func;
         this.summary = '';
         this.help = '';
-        this.hidden = false;
+        this.internal = false;
     }
 
     /**
@@ -285,11 +285,11 @@ class Command {
     }
 
     /**
-     * Mark command as hidden from help
+     * Mark command as internal
      * @returns {Command} This instance for chaining
      */
-    markHidden() {
-        this.hidden = true;
+    markInternal() {
+        this.internal = true;
         return this;
     }
 
@@ -310,11 +310,11 @@ class Command {
     }
 
     /**
-     * Check if command is hidden
-     * @returns {boolean} Whether the command is hidden
+     * Check if command is internal
+     * @returns {boolean} Whether the command is internal
      */
-    isHidden() {
-        return this.hidden;
+    isInternal() {
+        return this.internal;
     }
 
     /**
@@ -712,8 +712,26 @@ class Terminal {
      * Initialize internal commands
      */
     initializeInternalCommands() {
-        this.withCommand("help", new Command(async (cmd, name) => {
+        this.withCommand("help", new Command(async (cmd, ...args) => {
             try {
+                let showInternal = false;
+                let name = undefined;
+
+                for (const arg of args) {
+                    if (arg === "-i" || arg === "--internal") {
+                        showInternal = true;
+                        continue;
+                    }
+
+                    if (name === undefined || name === "") {
+                        name = arg;
+                        continue;
+                    }
+
+                    cmd.stdErr("Usage: help [-i|--internal] [command]\n");
+                    return 1;
+                }
+
                 if (name !== undefined && name !== "") {
                     if (!this.commandExists(name)) {
                         cmd.stdErr(`No help entry for '${name}'\n`);
@@ -734,10 +752,13 @@ class Terminal {
                 let output = "Commands:\n";
                 for (const commandName in commands) {
                     const command = this.getCommand(commandName);
-                    if (!command.isHidden()) {
-                        const summary = command.getSummary();
-                        output += `\n${commandName.padEnd(maxLength, ' ')} : ${summary || "N/A"}`;
+                    if (!showInternal && command.isInternal()) {
+                        continue;
                     }
+
+                    const summary = command.getSummary();
+                    const internalTag = command.isInternal() ? " [internal]" : "";
+                    output += `\n${commandName.padEnd(maxLength, ' ')} : ${summary || "N/A"}${internalTag}`;
                 }
 
                 cmd.stdOut(output + "\n");
@@ -747,8 +768,8 @@ class Terminal {
                 cmd.stdErr(`Error: ${error.message}\n`);
                 return 1;
             }
-        }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
-          .withHelp("Shows all available commands or detailed help for a specific command.\n\nUsage: help [command]"));
+                }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
+                    .withHelp("Shows all user-facing commands or detailed help for a specific command.\nUse -i or --internal to include internal commands in the list.\n\nUsage: help [-i|--internal] [command]"));
 
         this.withCommand("echo", new Command(async (cmd, ...args) => {
             const suppressNewline = args[0] === "-n";
@@ -757,7 +778,7 @@ class Terminal {
             return 0;
         }).withSummary("Displays a line of text")
             .withHelp("Prints its arguments to standard output.\n\nUsage: echo [-n] [text ...]")
-            .markHidden());
+            .markInternal());
 
         this.withCommand("date", new Command(async (cmd, ...args) => {
             const options = parseArg(args ? args.join(' ') : "");
@@ -766,14 +787,14 @@ class Terminal {
             return 0;
         }).withSummary("Displays the current date and time")
             .withHelp("Prints the current date and time.\n\nUsage: date [-u|--utc]")
-            .markHidden());
+            .markInternal());
 
         this.withCommand("whoami", new Command(async (cmd) => {
             cmd.stdOut("lee\n");
             return 0;
         }).withSummary("Displays the current user")
             .withHelp("Prints the current username.\n\nUsage: whoami")
-            .markHidden());
+            .markInternal());
 
         this.withCommand("uname", new Command(async (cmd, ...args) => {
             const options = parseArg(args ? args.join(' ') : "");
@@ -789,7 +810,7 @@ class Terminal {
             return 0;
         }).withSummary("Displays system information")
             .withHelp("Prints basic system information.\n\nUsage: uname [-a]")
-            .markHidden());
+            .markInternal());
 
         this.withCommand("which", new Command(async (cmd, ...args) => {
             if (args.length === 0) {
@@ -810,7 +831,7 @@ class Terminal {
             return exitCode;
         }).withSummary("Locates a command")
             .withHelp("Displays whether a command exists in this terminal.\n\nUsage: which <command> [command ...]")
-            .markHidden());
+            .markInternal());
 
         this.withCommand("set", new Command(async (cmd) => {
                 const variableNames = Object.keys(this.variables).sort();
@@ -819,7 +840,7 @@ class Terminal {
                 return 0;
         }).withSummary("Displays shell variables")
             .withHelp("Prints all shell variables.\n\nUsage: set")
-            .markHidden());
+            .markInternal());
 
         this.withCommand("unset", new Command(async (cmd, ...args) => {
                 if (args.length === 0) {
@@ -834,7 +855,7 @@ class Terminal {
                 return 0;
         }).withSummary("Unsets shell variables")
             .withHelp("Removes one or more shell variables.\n\nUsage: unset <name> [name ...]")
-            .markHidden());
+            .markInternal());
 
         this.withCommand("history", new Command(async (cmd, ...args) => {
             try {
@@ -851,13 +872,17 @@ class Terminal {
                 cmd.stdErr(`Error: ${error.message}\n`);
                 return 1;
             }
-        }).markHidden());
+        }).withSummary("Shows previously entered commands")
+            .withHelp("Displays command history in chronological order.\nUse -c to clear the history.\n\nUsage: history [-c]")
+            .markInternal());
 
         this.withCommand("clear", new Command(async () => {
             this.output = '';
             this.render();
             return 0;
-        }).markHidden());
+        }).withSummary("Clears the terminal output")
+            .withHelp("Clears all visible terminal output and redraws the prompt.\n\nUsage: clear")
+            .markInternal());
     }
 
     /**

@@ -192,6 +192,7 @@ class KeyboardHandler {
      */
     constructor(terminal) {
         this.terminal = terminal;
+        this.element = null;
     }
 
     /**
@@ -199,7 +200,50 @@ class KeyboardHandler {
      * @param {HTMLElement} element - Element to attach listener to
      */
     attach(element) {
+        this.element = element;
         element.addEventListener('keydown', (e) => this.handleKeyDown(e));
+        element.addEventListener('paste', (e) => this.handlePaste(e));
+    }
+
+    /**
+     * Check whether text is selected inside the terminal element
+     * @returns {boolean} Whether terminal text is selected
+     */
+    hasTerminalSelection() {
+        const selection = window.getSelection?.();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+            return false;
+        }
+
+        if (!this.element) {
+            return false;
+        }
+
+        const range = selection.getRangeAt(0);
+        return this.element.contains(range.commonAncestorContainer);
+    }
+
+    /**
+     * Handle paste event
+     * @param {ClipboardEvent} e - The clipboard event
+     */
+    handlePaste(e) {
+        e.preventDefault();
+
+        const pastedText = e.clipboardData?.getData("text") || "";
+        if (!pastedText) {
+            return;
+        }
+
+        // Keep the terminal input single-line for predictable command parsing.
+        const normalizedText = pastedText
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .replace(/\n/g, " ");
+
+        if (normalizedText.length > 0) {
+            this.terminal.writeInputAtCursor(normalizedText);
+        }
     }
 
     /**
@@ -207,12 +251,29 @@ class KeyboardHandler {
      * @param {KeyboardEvent} e - The keyboard event
      */
     async handleKeyDown(e) {
-        e.preventDefault();
-
         try {
+            const isCopyShortcut = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c";
+
+            // Let browser paste shortcuts flow to the paste event handler.
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+                return;
+            }
+
+            // Let browser copy shortcuts work when terminal text is selected.
+            if (isCopyShortcut && this.hasTerminalSelection()) {
+                return;
+            }
+
+            // Ignore most modified shortcuts so we do not type their key glyphs.
+            if (e.altKey || e.metaKey || (e.ctrlKey && !isCopyShortcut)) {
+                return;
+            }
+
+            e.preventDefault();
+
             if (e.key === "Enter") {
                 await this.terminal.submitCurrentInput();
-            } else if (e.key === "c" && e.ctrlKey) {
+            } else if (isCopyShortcut) {
                 this.terminal.interrupt();
             } else if (e.key === "Backspace") {
                 this.terminal.deleteInputBeforeCursor();

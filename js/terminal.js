@@ -1,245 +1,27 @@
-function Terminal(terminal) {
-    this.terminal = terminal
-    this.output = '';
-    this.inputBuffer = '';
-    this.cursorX = 0;
-    this.promptPrefix = 'lee.io\u00A0>\u00A0';
-    this.outputNode = null;
-    this.inputNode = null;
-    this.promptNode = null;
-    this.inputBeforeNode = null;
-    this.cursorNode = null;
-    this.inputAfterNode = null;
-    
-    this.history = [];
-    this.historyScrollPos = 0;
-    this.historyLimit = 100;
-
-    this.commands = [];
-    this.lastExitCode = null;
-
-    this._escapeHTML = function(unsafe) {
-        return unsafe.replace(/[&<"']/g, function(m) {
-            switch (m) {
-                case '&':
-                    return '&amp;';
-                case '<':
-                    return '&lt;';
-                case '"':
-                    return '&quot;';
-                default:
-                    return '&#039;';
-            }
-        });
-    };
-
-    this._flushOutput = function() {
-        let inputBefore = this.inputBuffer.substr(0, this.cursorX);
-        let inputAtCursor = (this.inputBuffer.length > this.cursorX) ? this.inputBuffer.charAt(this.cursorX) : " ";
-        let inputAfter = (this.inputBuffer.length > this.cursorX) ? this.inputBuffer.substr(this.cursorX + 1) : "";
-
-        this.outputNode.textContent = this.output;
-        this.promptNode.nodeValue = this.promptPrefix;
-        this.inputBeforeNode.nodeValue = inputBefore;
-        this.cursorNode.textContent = inputAtCursor;
-        this.inputAfterNode.nodeValue = inputAfter;
-        this.terminal.scrollTop = this.terminal.scrollHeight - this.terminal.clientHeight
+/**
+ * @class Renderer
+ * @description Handles all DOM manipulation and rendering for the terminal
+ */
+class Renderer {
+    /**
+     * @param {HTMLElement} terminalElement - The terminal DOM element
+     * @param {string} promptPrefix - The prompt prefix to display
+     */
+    constructor(terminalElement, promptPrefix) {
+        this.terminal = terminalElement;
+        this.promptPrefix = promptPrefix;
+        this.outputNode = null;
+        this.inputNode = null;
+        this.promptNode = null;
+        this.inputBeforeNode = null;
+        this.cursorNode = null;
+        this.inputAfterNode = null;
     }
 
-    this._clearInputBuffer = function() {
-        return;
-    }
-
-    this._newInputBuffer = function() {
-        this.cursorX = 0
-        this.inputBuffer = '';
-        this._flushOutput();
-    }
-
-    this._resetInputBuffer = function() {        
-        this._clearInputBuffer();
-        this._newInputBuffer();
-    }
-    
-    this._writeInputAtCursor = function(text='') {
-        let cursorSuffix = this.inputBuffer.substr(this.cursorX);
-        this.inputBuffer = this.inputBuffer.substr(0, this.cursorX) + text + cursorSuffix;
-        this.cursorX = this.cursorX+text.length;
-        this._flushOutput();
-    }
-    
-    this._deleteInputBeforeCursor = function() {
-        if (this.cursorX === 0) {
-            return;
-        }
-
-        let cursorSuffix = this.inputBuffer.substr(this.cursorX);
-        this.inputBuffer = this.inputBuffer.substr(0, this.cursorX-1) + cursorSuffix;
-        this.cursorX--;
-        this._flushOutput();
-    }
-    
-    this._deleteInputAtCursor = function() {
-        if (this.cursorX >= this.inputBuffer.length) {
-            return;
-        }
-
-        let cursorSuffix = this.inputBuffer.substr(this.cursorX+1);
-        this.inputBuffer = this.inputBuffer.substr(0, this.cursorX) + cursorSuffix;
-        this._flushOutput();
-    }
-
-    this._moveCursorStart = function() {
-        this.cursorX = 0;
-        this._flushOutput();
-    }
-
-    this._moveCursorEnd = function() {
-        this.cursorX = this.inputBuffer.length;
-        this._flushOutput();
-    }
-
-    this._moveCursorLeft = function() {
-        if (this.cursorX > 0) {
-            this.cursorX--;
-            this._flushOutput();
-        }
-    }
-
-    this._moveCursorRight = function() {
-        if (this.cursorX < this.inputBuffer.length) {
-            this.cursorX++;
-            this._flushOutput();
-        }
-    }
-
-    this._scrollHistoryPrevious = function() {
-        if (this.history.length > 0) {
-            if (this.historyScrollPos < this.history.length) {              
-                this.historyScrollPos++;
-            }
-
-            this._resetInputBuffer();
-            this._writeInputAtCursor(this.history[this.historyScrollPos-1])
-        }
-    }
-
-    this._scrollHistoryNext = function() {
-        if (this.history.length > 0 && this.historyScrollPos > 0) {
-            this.historyScrollPos--;
-
-            this._resetInputBuffer();
-            if (this.historyScrollPos > 0) {
-                this._writeInputAtCursor(this.history[this.historyScrollPos-1])
-            }
-        }
-    }
-
-    this._prompt = function() {
-        this.historyScrollPos = 0;
-        this._newInputBuffer();
-    }
-
-    this._addCommand = function(name, cmd) {        
-        if (!this._commandExists(name)) {
-            this.commands[name] = cmd
-        }
-    }
-
-    this._commandExists = function(name) {
-        return (name in this.commands);
-    }
-
-    this._getCommand = function(name) {
-        if (this._commandExists(name)) {
-            return this.commands[name];
-        }
-
-        return undefined;
-    },
-
-    this._getCommands = function() {
-        return this.commands
-    }
-
-    this._initInternalCommands = function() {
-        let outer = this;
-        this.withCommand("help", new Command(async function(cmd, name) {
-            if (name !== undefined && name !== "") {
-                if (!outer._commandExists(name)) {
-                    cmd.stdErr(`No help entry for '${name}'\n`);
-                    return 1;
-                }
-                cmd.stdOut(outer._getCommand(name).getHelp() + "\n");
-                return 0;
-            }
-    
-            function getCommandNameMaxLength() {
-                var length = 10;
-                for (var commandName in outer._getCommands()) {
-                    if (commandName.length > length) {
-                        length = commandName.length
-                    }
-                }
-                return length
-            }
-    
-            let output = "Commands:\n";
-            var commandPadLength = getCommandNameMaxLength();
-            for (let commandName in outer._getCommands()) {
-                let command = outer._getCommand(commandName);
-                if (!command.getHidden()) {
-                    let summary = command.getSummary();
-                    output += `\n${commandName.padEnd(commandPadLength, ' ')} : ` + ((summary) ? summary : "N/A");
-                }
-            }
-
-            cmd.stdOut(output + "\n");
-            return 0;
-        }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
-          .withHelp("No u"))
-            
-        this.withCommand("history", new Command(async function(cmd, ...args) {
-            let argsParsed = parseArg(args ? args.join(' ') : "")
-            if (argsParsed.c === true) {
-                outer.history = [];
-                return 0;
-            }
-            
-            cmd.stdOut(outer.history.reverse().join("\n") + "\n");
-            return 0;
-        }).withHidden())
-            
-        this.withCommand("clear", new Command(async function() {
-            outer.output = '';
-            return 0;
-        }).withHidden())
-    }
-
-    this._commandOutputFunc = function() {
-        let outer = this;
-        return {
-            stdOut: function(text) {
-                outer.output = outer.output + text
-                outer._flushOutput();
-            },
-            stdErr: function(text) {
-                outer.output = outer.output + text
-                outer._flushOutput();
-            }
-        }
-    }
-
-    // Public
-
-    this.withCommand = function(name, cmd) {
-        this._addCommand(name, cmd)
-        return this;
-    }
-
-    this.run = function() {
-        this._initInternalCommands();
-
+    /**
+     * Initialize the renderer's DOM elements
+     */
+    initialize() {
         this.terminal.textContent = "";
         this.outputNode = document.createElement("span");
         this.inputNode = document.createElement("span");
@@ -248,131 +30,618 @@ function Terminal(terminal) {
         this.cursorNode = document.createElement("span");
         this.cursorNode.className = "cursor";
         this.inputAfterNode = document.createTextNode("");
+
         this.inputNode.appendChild(this.promptNode);
         this.inputNode.appendChild(this.inputBeforeNode);
         this.inputNode.appendChild(this.cursorNode);
         this.inputNode.appendChild(this.inputAfterNode);
         this.terminal.appendChild(this.outputNode);
         this.terminal.appendChild(this.inputNode);
+    }
 
-        let outer = this;
-        this.terminal.addEventListener('keydown', async function (e) {
-            e.preventDefault();
-            switch (true) {
-                case (e.key == "Enter"):
-                    outer.output = outer.output + outer.promptPrefix + outer.inputBuffer + "\n"
-                    if (outer.inputBuffer.length > 0) {
-                        if (outer.history.length > outer.historyLimit) {
-                            outer.history.pop()
-                        }
-                        outer.history.unshift(outer.inputBuffer)
+    /**
+     * Render the current terminal state
+     * @param {string} output - Current output text
+     * @param {string} inputBuffer - Current input buffer
+     * @param {number} cursorX - Current cursor position
+     */
+    render(output, inputBuffer, cursorX) {
+        const inputBefore = inputBuffer.substring(0, cursorX);
+        const inputAtCursor = (inputBuffer.length > cursorX) ? inputBuffer.charAt(cursorX) : " ";
+        const inputAfter = (inputBuffer.length > cursorX) ? inputBuffer.substring(cursorX + 1) : "";
 
-                        let inputBufferSplit = outer.inputBuffer.split(' ')
-                        let command = inputBufferSplit.shift();
+        this.outputNode.textContent = output;
+        this.promptNode.nodeValue = this.promptPrefix;
+        this.inputBeforeNode.nodeValue = inputBefore;
+        this.cursorNode.textContent = inputAtCursor;
+        this.inputAfterNode.nodeValue = inputAfter;
 
-                        outer._flushOutput();
-                        if (outer._commandExists(command)) {
-                            let exitCode = await outer.commands[command].execute(outer._commandOutputFunc(), ...inputBufferSplit);
-                            outer.lastExitCode = (exitCode) ? exitCode : 0;                            
-                        } else {
-                            outer.output = outer.output + command + ': command not found\n';
-                            outer._flushOutput();
-                        }
-                    }
-                    outer._prompt();
-                    break;
-                case (e.key == "c" && e.ctrlKey):
-                    outer.output = outer.output + outer.promptPrefix + outer.inputBuffer + "\n"
-                    outer._prompt();
-                    break;
-                case (e.key == "Backspace"):
-                    outer._deleteInputBeforeCursor()
-                    break;
-                case (e.key == "Delete"):
-                    outer._deleteInputAtCursor()
-                    break;
-                case (e.key == "ArrowLeft"):
-                    outer._moveCursorLeft();
-                    break;
-                case (e.key == "ArrowRight"):
-                    outer._moveCursorRight();
-                    break;
-                case (e.key == "Home"):
-                    outer._moveCursorStart();
-                    break;
-                case (e.key == "End"):
-                    outer._moveCursorEnd();
-                    break;
-                case (e.key == "ArrowUp"):
-                    outer._scrollHistoryPrevious();
-                    break;
-                case (e.key == "ArrowDown"):
-                    outer._scrollHistoryNext();
-                    break;
-                default:
-                    if (e.key.length == 1) {
-                        outer._writeInputAtCursor(e.key)
-                    }
-            }
-        });
+        // Auto-scroll to bottom
+        this.terminal.scrollTop = this.terminal.scrollHeight - this.terminal.clientHeight;
+    }
 
+    /**
+     * Get the terminal element for event listeners
+     * @returns {HTMLElement} The terminal element
+     */
+    getElement() {
+        return this.terminal;
+    }
+
+    /**
+     * Focus the terminal
+     */
+    focus() {
         this.terminal.focus();
-        this.output = `Type 'help' for help\n`
-        this._prompt();
     }
 }
 
-function Command(func) {
-    this.func = func
-
-    this.withFunc = function(func) {
-        this.func = func
-        return this
+/**
+ * @class InputBuffer
+ * @description Manages terminal input buffer state
+ */
+class InputBuffer {
+    constructor() {
+        this.buffer = '';
+        this.cursorX = 0;
     }
 
-    this.withSummary = function(summary) {
-        this.summary = summary
-        return this
+    /**
+     * Write text at cursor position
+     * @param {string} text - Text to write
+     */
+    write(text = '') {
+        const cursorSuffix = this.buffer.substring(this.cursorX);
+        this.buffer = this.buffer.substring(0, this.cursorX) + text + cursorSuffix;
+        this.cursorX += text.length;
     }
 
-    this.withHelp = function(help) {
-        this.help = help
-        return this
+    /**
+     * Delete character before cursor (backspace)
+     */
+    deleteBeforeCursor() {
+        if (this.cursorX === 0) return;
+        const cursorSuffix = this.buffer.substring(this.cursorX);
+        this.buffer = this.buffer.substring(0, this.cursorX - 1) + cursorSuffix;
+        this.cursorX--;
     }
 
-    this.withHidden = function() {
-        this.hidden = true
-        return this
+    /**
+     * Delete character at cursor (delete)
+     */
+    deleteAtCursor() {
+        if (this.cursorX >= this.buffer.length) return;
+        const cursorSuffix = this.buffer.substring(this.cursorX + 1);
+        this.buffer = this.buffer.substring(0, this.cursorX) + cursorSuffix;
     }
 
-    this.getHelp = function() {
-        return this.help
+    /**
+     * Move cursor to start
+     */
+    cursorToStart() {
+        this.cursorX = 0;
     }
 
-    this.getSummary = function() {
-        return this.summary
+    /**
+     * Move cursor to end
+     */
+    cursorToEnd() {
+        this.cursorX = this.buffer.length;
     }
 
-    this.getHidden = function() {
-        return this.hidden
+    /**
+     * Move cursor left
+     */
+    cursorLeft() {
+        if (this.cursorX > 0) this.cursorX--;
     }
 
-    this.execute = function(cmd, ...args) {
-        return this.func(cmd, ...args)
+    /**
+     * Move cursor right
+     */
+    cursorRight() {
+        if (this.cursorX < this.buffer.length) this.cursorX++;
+    }
+
+    /**
+     * Clear and reset the input buffer
+     */
+    reset() {
+        this.buffer = '';
+        this.cursorX = 0;
+    }
+
+    /**
+     * Get the current buffer content
+     * @returns {string} The buffer content
+     */
+    getContent() {
+        return this.buffer;
+    }
+
+    /**
+     * Get the current cursor position
+     * @returns {number} The cursor position
+     */
+    getCursorX() {
+        return this.cursorX;
     }
 }
 
-// https://github.com/tnhu/arg
-function parseArg(argv="") {
-    let result = {}; // reset
+/**
+ * @class KeyboardHandler
+ * @description Handles keyboard input events
+ */
+class KeyboardHandler {
+    /**
+     * @param {Terminal} terminal - The terminal instance
+     */
+    constructor(terminal) {
+        this.terminal = terminal;
+    }
+
+    /**
+     * Attach keyboard event listener
+     * @param {HTMLElement} element - Element to attach listener to
+     */
+    attach(element) {
+        element.addEventListener('keydown', (e) => this.handleKeyDown(e));
+    }
+
+    /**
+     * Handle keydown event
+     * @param {KeyboardEvent} e - The keyboard event
+     */
+    async handleKeyDown(e) {
+        e.preventDefault();
+
+        try {
+            if (e.key === "Enter") {
+                await this.terminal.executeCommand();
+            } else if (e.key === "c" && e.ctrlKey) {
+                this.terminal.interrupt();
+            } else if (e.key === "Backspace") {
+                this.terminal.deleteInputBeforeCursor();
+            } else if (e.key === "Delete") {
+                this.terminal.deleteInputAtCursor();
+            } else if (e.key === "ArrowLeft") {
+                this.terminal.moveCursorLeft();
+            } else if (e.key === "ArrowRight") {
+                this.terminal.moveCursorRight();
+            } else if (e.key === "Home") {
+                this.terminal.moveCursorStart();
+            } else if (e.key === "End") {
+                this.terminal.moveCursorEnd();
+            } else if (e.key === "ArrowUp") {
+                this.terminal.scrollHistoryPrevious();
+            } else if (e.key === "ArrowDown") {
+                this.terminal.scrollHistoryNext();
+            } else if (e.key.length === 1) {
+                this.terminal.writeInputAtCursor(e.key);
+            }
+        } catch (error) {
+            console.error('Keyboard handler error:', error);
+        }
+    }
+}
+
+/**
+ * @class Command
+ * @description Represents a terminal command with metadata
+ */
+class Command {
+    /**
+     * @param {Function} func - The async function to execute
+     */
+    constructor(func) {
+        this.func = func;
+        this.summary = '';
+        this.help = '';
+        this.hidden = false;
+    }
+
+    /**
+     * Set the command function
+     * @param {Function} func - The async function
+     * @returns {Command} This instance for chaining
+     */
+    withFunc(func) {
+        this.func = func;
+        return this;
+    }
+
+    /**
+     * Set the command summary
+     * @param {string} summary - Short description
+     * @returns {Command} This instance for chaining
+     */
+    withSummary(summary) {
+        this.summary = summary;
+        return this;
+    }
+
+    /**
+     * Set the command help text
+     * @param {string} help - Detailed help text
+     * @returns {Command} This instance for chaining
+     */
+    withHelp(help) {
+        this.help = help;
+        return this;
+    }
+
+    /**
+     * Mark command as hidden from help
+     * @returns {Command} This instance for chaining
+     */
+    markHidden() {
+        this.hidden = true;
+        return this;
+    }
+
+    /**
+     * Get the help text
+     * @returns {string} The help text
+     */
+    getHelp() {
+        return this.help;
+    }
+
+    /**
+     * Get the summary text
+     * @returns {string} The summary text
+     */
+    getSummary() {
+        return this.summary;
+    }
+
+    /**
+     * Check if command is hidden
+     * @returns {boolean} Whether the command is hidden
+     */
+    isHidden() {
+        return this.hidden;
+    }
+
+    /**
+     * Execute the command
+     * @param {Object} cmd - The command output interface
+     * @param {...any} args - Command arguments
+     * @returns {Promise<number>} The exit code
+     */
+    async execute(cmd, ...args) {
+        try {
+            return await this.func(cmd, ...args);
+        } catch (error) {
+            console.error('Command execution error:', error);
+            cmd.stdErr(`Error executing command: ${error.message}\n`);
+            return 1;
+        }
+    }
+}
+
+/**
+ * @class Terminal
+ * @description Main terminal emulator class
+ */
+class Terminal {
+    /**
+     * @param {HTMLElement} terminalElement - The terminal DOM element
+     */
+    constructor(terminalElement) {
+        this.renderer = new Renderer(terminalElement, 'lee.io\u00A0>\u00A0');
+        this.inputBuffer = new InputBuffer();
+        this.keyboardHandler = new KeyboardHandler(this);
+
+        this.output = '';
+        this.history = [];
+        this.historyScrollPos = 0;
+        this.historyLimit = 100;
+        this.commands = {};
+        this.lastExitCode = 0;
+    }
+
+    /**
+     * Add a command to the terminal
+     * @param {string} name - Command name
+     * @param {Command} command - Command instance
+     * @returns {Terminal} This instance for chaining
+     */
+    withCommand(name, command) {
+        if (!this.commandExists(name)) {
+            this.commands[name] = command;
+        }
+        return this;
+    }
+
+    /**
+     * Check if a command exists
+     * @param {string} name - Command name
+     * @returns {boolean} Whether the command exists
+     */
+    commandExists(name) {
+        return name in this.commands;
+    }
+
+    /**
+     * Get a command by name
+     * @param {string} name - Command name
+     * @returns {Command|undefined} The command or undefined
+     */
+    getCommand(name) {
+        return this.commands[name];
+    }
+
+    /**
+     * Get all commands
+     * @returns {Object} All commands
+     */
+    getCommands() {
+        return this.commands;
+    }
+
+    /**
+     * Write text at cursor position
+     * @param {string} text - Text to write
+     */
+    writeInputAtCursor(text = '') {
+        this.inputBuffer.write(text);
+        this.render();
+    }
+
+    /**
+     * Delete character before cursor
+     */
+    deleteInputBeforeCursor() {
+        this.inputBuffer.deleteBeforeCursor();
+        this.render();
+    }
+
+    /**
+     * Delete character at cursor
+     */
+    deleteInputAtCursor() {
+        this.inputBuffer.deleteAtCursor();
+        this.render();
+    }
+
+    /**
+     * Move cursor to start
+     */
+    moveCursorStart() {
+        this.inputBuffer.cursorToStart();
+        this.render();
+    }
+
+    /**
+     * Move cursor to end
+     */
+    moveCursorEnd() {
+        this.inputBuffer.cursorToEnd();
+        this.render();
+    }
+
+    /**
+     * Move cursor left
+     */
+    moveCursorLeft() {
+        this.inputBuffer.cursorLeft();
+        this.render();
+    }
+
+    /**
+     * Move cursor right
+     */
+    moveCursorRight() {
+        this.inputBuffer.cursorRight();
+        this.render();
+    }
+
+    /**
+     * Scroll history backward (up arrow)
+     */
+    scrollHistoryPrevious() {
+        if (this.history.length > 0) {
+            if (this.historyScrollPos < this.history.length) {
+                this.historyScrollPos++;
+            }
+            this.inputBuffer.reset();
+            this.inputBuffer.write(this.history[this.historyScrollPos - 1]);
+            this.render();
+        }
+    }
+
+    /**
+     * Scroll history forward (down arrow)
+     */
+    scrollHistoryNext() {
+        if (this.history.length > 0 && this.historyScrollPos > 0) {
+            this.historyScrollPos--;
+            this.inputBuffer.reset();
+            if (this.historyScrollPos > 0) {
+                this.inputBuffer.write(this.history[this.historyScrollPos - 1]);
+            }
+            this.render();
+        }
+    }
+
+    /**
+     * Show the prompt
+     */
+    showPrompt() {
+        this.historyScrollPos = 0;
+        this.inputBuffer.reset();
+        this.render();
+    }
+
+    /**
+     * Create the command output interface
+     * @returns {Object} Object with stdOut and stdErr methods
+     */
+    createCommandOutput() {
+        return {
+            stdOut: (text) => {
+                this.output += text;
+                this.render();
+            },
+            stdErr: (text) => {
+                this.output += text;
+                this.render();
+            }
+        };
+    }
+
+    /**
+     * Execute the current input as a command
+     */
+    async executeCommand() {
+        const inputBuffer = this.inputBuffer.getContent();
+        this.output += this.renderer.promptPrefix + inputBuffer + "\n";
+
+        if (inputBuffer.length > 0) {
+            // Add to history
+            if (this.history.length >= this.historyLimit) {
+                this.history.pop();
+            }
+            this.history.unshift(inputBuffer);
+
+            // Parse command and arguments
+            const parts = inputBuffer.split(' ');
+            const commandName = parts.shift();
+
+            this.render();
+
+            try {
+                if (this.commandExists(commandName)) {
+                    const command = this.getCommand(commandName);
+                    this.lastExitCode = await command.execute(this.createCommandOutput(), ...parts);
+                } else {
+                    this.output += `${commandName}: command not found\n`;
+                    this.render();
+                }
+            } catch (error) {
+                console.error('Command execution error:', error);
+                this.output += `Error: ${error.message}\n`;
+                this.render();
+            }
+        }
+
+        this.showPrompt();
+    }
+
+    /**
+     * Handle Ctrl+C interrupt
+     */
+    interrupt() {
+        const inputBuffer = this.inputBuffer.getContent();
+        this.output += this.renderer.promptPrefix + inputBuffer + "\n";
+        this.showPrompt();
+    }
+
+    /**
+     * Render the terminal
+     */
+    render() {
+        this.renderer.render(
+            this.output,
+            this.inputBuffer.getContent(),
+            this.inputBuffer.getCursorX()
+        );
+    }
+
+    /**
+     * Initialize internal commands
+     */
+    initializeInternalCommands() {
+        this.withCommand("help", new Command(async (cmd, name) => {
+            try {
+                if (name !== undefined && name !== "") {
+                    if (!this.commandExists(name)) {
+                        cmd.stdErr(`No help entry for '${name}'\n`);
+                        return 1;
+                    }
+                    cmd.stdOut(this.getCommand(name).getHelp() + "\n");
+                    return 0;
+                }
+
+                const commands = this.getCommands();
+                let maxLength = 10;
+                for (const commandName in commands) {
+                    if (commandName.length > maxLength) {
+                        maxLength = commandName.length;
+                    }
+                }
+
+                let output = "Commands:\n";
+                for (const commandName in commands) {
+                    const command = this.getCommand(commandName);
+                    if (!command.isHidden()) {
+                        const summary = command.getSummary();
+                        output += `\n${commandName.padEnd(maxLength, ' ')} : ${summary || "N/A"}`;
+                    }
+                }
+
+                cmd.stdOut(output + "\n");
+                return 0;
+            } catch (error) {
+                console.error('Help command error:', error);
+                cmd.stdErr(`Error: ${error.message}\n`);
+                return 1;
+            }
+        }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
+          .withHelp("Shows all available commands or detailed help for a specific command.\n\nUsage: help [command]"));
+
+        this.withCommand("history", new Command(async (cmd, ...args) => {
+            try {
+                const argsParsed = parseArg(args ? args.join(' ') : "");
+                if (argsParsed.c === true) {
+                    this.history = [];
+                    return 0;
+                }
+
+                cmd.stdOut(this.history.slice().reverse().join("\n") + "\n");
+                return 0;
+            } catch (error) {
+                console.error('History command error:', error);
+                cmd.stdErr(`Error: ${error.message}\n`);
+                return 1;
+            }
+        }).markHidden());
+
+        this.withCommand("clear", new Command(async () => {
+            this.output = '';
+            this.render();
+            return 0;
+        }).markHidden());
+    }
+
+    /**
+     * Start the terminal
+     */
+    run() {
+        this.initializeInternalCommands();
+        this.renderer.initialize();
+        this.keyboardHandler.attach(this.renderer.getElement());
+        this.renderer.focus();
+        this.output = `Type 'help' for help\n`;
+        this.showPrompt();
+    }
+}
+
+/**
+ * Parse command-line arguments
+ * @param {string} argv - Arguments string
+ * @returns {Object} Parsed arguments
+ * @see {@link https://github.com/tnhu/arg}
+ */
+function parseArg(argv = "") {
+    const result = {};
     let i = 0;
     let item = null;
     for (
         argv = argv.split(/\s*\B[\/-]+([\w-]+)[\s=]*/), i = 1;
-
-        item = argv[i++]; // while !eoargv
-
-        result[item] = argv[i++] || !0 // set value, default true
+        item = argv[i++];
+        result[item] = argv[i++] || !0
     );
     return result;
 }

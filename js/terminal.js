@@ -40,24 +40,38 @@ class Renderer {
     }
 
     /**
+     * Keep viewport pinned to the latest terminal output
+     */
+    scrollToBottom() {
+        this.terminal.scrollTop = this.terminal.scrollHeight - this.terminal.clientHeight;
+    }
+
+    /**
+     * Render only output text without touching the editable input row
+     * @param {string} output - Current output text
+     */
+    renderOutput(output) {
+        this.outputNode.textContent = output;
+        this.scrollToBottom();
+    }
+
+    /**
      * Render the current terminal state
      * @param {string} output - Current output text
      * @param {string} inputBuffer - Current input buffer
      * @param {number} cursorX - Current cursor position
      */
-    render(output, inputBuffer, cursorX) {
+    render(output, inputBuffer, cursorX, promptPrefix = this.promptPrefix) {
         const inputBefore = inputBuffer.substring(0, cursorX);
         const inputAtCursor = (inputBuffer.length > cursorX) ? inputBuffer.charAt(cursorX) : " ";
         const inputAfter = (inputBuffer.length > cursorX) ? inputBuffer.substring(cursorX + 1) : "";
 
-        this.outputNode.textContent = output;
-        this.promptNode.nodeValue = this.promptPrefix;
+        this.renderOutput(output);
+        this.promptNode.nodeValue = promptPrefix;
         this.inputBeforeNode.nodeValue = inputBefore;
         this.cursorNode.textContent = inputAtCursor;
         this.inputAfterNode.nodeValue = inputAfter;
-
-        // Auto-scroll to bottom
-        this.terminal.scrollTop = this.terminal.scrollHeight - this.terminal.clientHeight;
+        this.scrollToBottom();
     }
 
     /**
@@ -197,7 +211,7 @@ class KeyboardHandler {
 
         try {
             if (e.key === "Enter") {
-                await this.terminal.executeCommand();
+                await this.terminal.submitCurrentInput();
             } else if (e.key === "c" && e.ctrlKey) {
                 this.terminal.interrupt();
             } else if (e.key === "Backspace") {
@@ -339,6 +353,8 @@ class Terminal {
         this.historyLimit = 100;
         this.commands = {};
         this.variables = {};
+        this.commandQueue = [];
+        this.isExecutingCommand = false;
         this.lastExitCode = 0;
     }
 
@@ -467,11 +483,21 @@ class Terminal {
     }
 
     /**
+     * Reset history scroll position
+     * @private
+     */
+    _resetHistoryScrollPos() {
+        this.historyScrollPos = 0;
+    }
+
+    /**
      * Show the prompt
      */
-    showPrompt() {
-        this.historyScrollPos = 0;
-        this.inputBuffer.reset();
+    showPrompt(resetInput = true) {
+        this._resetHistoryScrollPos();
+        if (resetInput) {
+            this.inputBuffer.reset();
+        }
         this.render();
     }
 
@@ -483,11 +509,11 @@ class Terminal {
         return {
             stdOut: (text) => {
                 this.output += text;
-                this.render();
+                this.renderer.renderOutput(this.output);
             },
             stdErr: (text) => {
                 this.output += text;
-                this.render();
+                this.renderer.renderOutput(this.output);
             }
         };
     }
@@ -525,61 +551,124 @@ class Terminal {
     /**
      * Execute the current input as a command
      */
-    async executeCommand() {
-        const inputBuffer = this.inputBuffer.getContent();
-        this.output += this.renderer.promptPrefix + inputBuffer + "\n";
+    async runCommandLine(inputLine, echoPrompt = true) {
+        if (inputLine.length === 0) {
+            this.lastExitCode = 0;
+            return;
+        }
 
-        if (inputBuffer.length > 0) {
-            // Add to history
-            if (this.history.length >= this.historyLimit) {
-                this.history.pop();
-            }
-            this.history.unshift(inputBuffer);
+        // Echo command only when it actually starts executing, unless it
+        // was already displayed when queued while another command was running.
+        if (echoPrompt) {
+            this.output += this.renderer.promptPrefix + inputLine + "\n";
+            this.renderer.renderOutput(this.output);
+        }
 
-            // Parse command and arguments
-            const expandedInput = this.expandVariables(inputBuffer);
-            const parts = expandedInput.trim().split(/\s+/).filter(Boolean);
+        // Parse command and arguments
+        const expandedInput = this.expandVariables(inputLine);
+        const parts = expandedInput.trim().split(/\s+/).filter(Boolean);
 
-            // Process leading NAME=value assignments
-            while (parts.length > 0) {
-                const assignment = this.parseAssignmentToken(parts[0]);
-                if (!assignment) {
-                    break;
-                }
-
-                this.variables[assignment.name] = assignment.value;
-                parts.shift();
+        // Process leading NAME=value assignments
+        while (parts.length > 0) {
+            const assignment = this.parseAssignmentToken(parts[0]);
+            if (!assignment) {
+                break;
             }
 
-            // Assignment-only input succeeds without running a command
-            if (parts.length === 0) {
-                this.lastExitCode = 0;
-                this.showPrompt();
+            this.variables[assignment.name] = assignment.value;
+            parts.shift();
+        }
+
+        // Assignment-only input succeeds without running a command
+        if (parts.length === 0) {
+            this.lastExitCode = 0;
+            return;
+        }
+
+        const commandName = parts.shift();
+
+        try {
+            if (this.commandExists(commandName)) {
+                const command = this.getCommand(commandName);
+                this.lastExitCode = await command.execute(this.createCommandOutput(), ...parts);
+            } else {
+                this.output += `${commandName}: command not found\n`;
+                this.lastExitCode = 127;
+                this.renderer.renderOutput(this.output);
+            }
+        } catch (error) {
+            console.error('Command execution error:', error);
+            this.output += `Error: ${error.message}\n`;
+            this.lastExitCode = 1;
+            this.renderer.renderOutput(this.output);
+        }
+    }
+
+    /**
+     * Execute queued commands one at a time
+     */
+    async drainCommandQueue() {
+        if (this.isExecutingCommand) {
+            return;
+        }
+
+        this.isExecutingCommand = true;
+        try {
+            while (this.commandQueue.length > 0) {
+                const queued = this.commandQueue.shift();
+                await this.runCommandLine(queued.line, queued.echoPrompt);
+            }
+        } finally {
+            this.isExecutingCommand = false;
+            this.showPrompt(false);
+        }
+    }
+
+    /**
+     * Submit current input line and enqueue for execution
+     */
+    async submitCurrentInput() {
+        const inputLine = this.inputBuffer.getContent();
+
+        // Match shell behavior for empty Enter.
+        if (inputLine.length === 0) {
+            // While a command is running, ignore empty Enter to avoid
+            // injecting visual blank lines.
+            if (this.isExecutingCommand) {
                 return;
             }
 
-            const commandName = parts.shift();
-
+            // Commit an empty prompt line (not a bare newline) so the next
+            // prompt appears on the immediate next line without extra spacing.
+            this.output += this.renderer.promptPrefix + "\n";
+            this._resetHistoryScrollPos();
+            this.inputBuffer.reset();
             this.render();
-
-            try {
-                if (this.commandExists(commandName)) {
-                    const command = this.getCommand(commandName);
-                    this.lastExitCode = await command.execute(this.createCommandOutput(), ...parts);
-                } else {
-                    this.output += `${commandName}: command not found\n`;
-                    this.lastExitCode = 127;
-                    this.render();
-                }
-            } catch (error) {
-                console.error('Command execution error:', error);
-                this.output += `Error: ${error.message}\n`;
-                this.lastExitCode = 1;
-                this.render();
-            }
+            return;
         }
 
-        this.showPrompt();
+        if (this.history.length >= this.historyLimit) {
+            this.history.pop();
+        }
+        this.history.unshift(inputLine);
+
+        const queuedWhileExecuting = this.isExecutingCommand;
+        if (queuedWhileExecuting) {
+            // Preserve visibility of queued input without drawing a fake prompt.
+            this.output += inputLine + "\n";
+            this.renderer.renderOutput(this.output);
+        }
+
+        this.commandQueue.push({ line: inputLine, echoPrompt: true });
+
+        this._resetHistoryScrollPos();
+        this.inputBuffer.reset();
+
+        // Keep cursor on the next line immediately after pressing Enter
+        // without showing the next prompt before command output starts.
+        this.render("");
+
+        await this.drainCommandQueue();
     }
 
     /**
@@ -588,17 +677,34 @@ class Terminal {
     interrupt() {
         const inputBuffer = this.inputBuffer.getContent();
         this.output += this.renderer.promptPrefix + inputBuffer + "\n";
-        this.showPrompt();
+        this.showPrompt(true);
+    }
+
+    /**
+     * Get the active prompt prefix for rendering
+     * @private
+     * @param {string|undefined} override - Optional prompt override
+     * @returns {string} Prompt prefix to render
+     */
+    _getPromptPrefix(override) {
+        if (override !== undefined) {
+            return override;
+        }
+
+        return this.isExecutingCommand ? "" : this.renderer.promptPrefix;
     }
 
     /**
      * Render the terminal
      */
-    render() {
+    render(promptPrefixOverride = undefined) {
+        const promptPrefix = this._getPromptPrefix(promptPrefixOverride);
+
         this.renderer.render(
             this.output,
             this.inputBuffer.getContent(),
-            this.inputBuffer.getCursorX()
+            this.inputBuffer.getCursorX(),
+            promptPrefix
         );
     }
 

@@ -126,7 +126,7 @@ const toolCommand = new Command(async function(cmd, name, ...args) {
  */
 document.addEventListener('DOMContentLoaded', () => {
     new Terminal(document.getElementById("terminal"))
-        .withCommand("about", aboutCommand)
+        .withCommand("whoami", aboutCommand)
         .withCommand("tool", toolCommand)
         .run();
 });

@@ -130,6 +130,41 @@ class InputBuffer {
     }
 
     /**
+     * Delete word before cursor (Ctrl+W)
+     */
+    deleteWordBeforeCursor() {
+        if (this.cursorX === 0) return;
+
+        let start = this.cursorX;
+        while (start > 0 && /\s/.test(this.buffer.charAt(start - 1))) {
+            start--;
+        }
+        while (start > 0 && !/\s/.test(this.buffer.charAt(start - 1))) {
+            start--;
+        }
+
+        this.buffer = this.buffer.substring(0, start) + this.buffer.substring(this.cursorX);
+        this.cursorX = start;
+    }
+
+    /**
+     * Delete word after cursor (Alt+D/Ctrl+Delete)
+     */
+    deleteWordAfterCursor() {
+        if (this.cursorX >= this.buffer.length) return;
+
+        let end = this.cursorX;
+        while (end < this.buffer.length && /\s/.test(this.buffer.charAt(end))) {
+            end++;
+        }
+        while (end < this.buffer.length && !/\s/.test(this.buffer.charAt(end))) {
+            end++;
+        }
+
+        this.buffer = this.buffer.substring(0, this.cursorX) + this.buffer.substring(end);
+    }
+
+    /**
      * Move cursor to start
      */
     cursorToStart() {
@@ -253,6 +288,8 @@ class KeyboardHandler {
     async handleKeyDown(e) {
         try {
             const isCopyShortcut = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c";
+            const isDeleteWordBefore = e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "w";
+            const isDeleteWordAfter = (e.altKey && e.key.toLowerCase() === "d") || (e.ctrlKey && !e.metaKey && e.key === "Delete");
 
             // Let browser paste shortcuts flow to the paste event handler.
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
@@ -261,6 +298,16 @@ class KeyboardHandler {
 
             // Let browser copy shortcuts work when terminal text is selected.
             if (isCopyShortcut && this.hasTerminalSelection()) {
+                return;
+            }
+
+            if (isDeleteWordBefore || isDeleteWordAfter) {
+                e.preventDefault();
+                if (isDeleteWordBefore) {
+                    this.terminal.deleteWordBeforeCursor();
+                } else {
+                    this.terminal.deleteWordAfterCursor();
+                }
                 return;
             }
 
@@ -297,6 +344,93 @@ class KeyboardHandler {
         } catch (error) {
             console.error('Keyboard handler error:', error);
         }
+    }
+}
+
+/**
+ * @class TextChannel
+ * @description Async text channel used to stream data between pipeline stages
+ */
+class TextChannel {
+    constructor(initialText = "") {
+        this.queue = [];
+        this.waiters = [];
+        this.closed = false;
+        this.bufferedText = "";
+        this.closedPromise = new Promise((resolve) => {
+            this.resolveClosed = resolve;
+        });
+
+        if (initialText.length > 0) {
+            this.write(initialText);
+        }
+    }
+
+    write(text = "") {
+        if (this.closed || text.length === 0) {
+            return;
+        }
+
+        this.bufferedText += text;
+        if (this.waiters.length > 0) {
+            const waiter = this.waiters.shift();
+            waiter({ value: text, done: false });
+            return;
+        }
+
+        this.queue.push(text);
+    }
+
+    close() {
+        if (this.closed) {
+            return;
+        }
+
+        this.closed = true;
+        this.resolveClosed();
+        while (this.waiters.length > 0) {
+            const waiter = this.waiters.shift();
+            waiter({ value: undefined, done: true });
+        }
+    }
+
+    getBufferedText() {
+        return this.bufferedText;
+    }
+
+    async readAll() {
+        if (!this.closed) {
+            await this.closedPromise;
+        }
+        return this.bufferedText;
+    }
+
+    async nextChunk() {
+        if (this.queue.length > 0) {
+            const value = this.queue.shift();
+            return { value, done: false };
+        }
+
+        if (this.closed) {
+            return { value: undefined, done: true };
+        }
+
+        return await new Promise((resolve) => {
+            this.waiters.push(resolve);
+        });
+    }
+
+    getStream() {
+        const channel = this;
+        return {
+            [Symbol.asyncIterator]() {
+                return {
+                    next() {
+                        return channel.nextChunk();
+                    }
+                };
+            }
+        };
     }
 }
 
@@ -484,6 +618,22 @@ class Terminal {
     }
 
     /**
+     * Delete word before cursor
+     */
+    deleteWordBeforeCursor() {
+        this.inputBuffer.deleteWordBeforeCursor();
+        this.render();
+    }
+
+    /**
+     * Delete word after cursor
+     */
+    deleteWordAfterCursor() {
+        this.inputBuffer.deleteWordAfterCursor();
+        this.render();
+    }
+
+    /**
      * Move cursor to start
      */
     moveCursorStart() {
@@ -566,17 +716,42 @@ class Terminal {
      * Create the command output interface
      * @returns {Object} Object with stdOut and stdErr methods
      */
-    createCommandOutput() {
-        return {
-            stdOut: (text) => {
+    createCommandOutput({ stdin = "", stdinReader = null, onStdOut = undefined, onStdErr = undefined } = {}) {
+        const stdOutWriter = typeof onStdOut === "function"
+            ? onStdOut
+            : (text) => {
                 this.output += text;
                 this.renderer.renderOutput(this.output);
-            },
-            stdErr: (text) => {
+            };
+
+        const stdErrWriter = typeof onStdErr === "function"
+            ? onStdErr
+            : (text) => {
                 this.output += text;
                 this.renderer.renderOutput(this.output);
+            };
+
+        const staticStream = {
+            async *[Symbol.asyncIterator]() {
+                if (stdin.length > 0) {
+                    yield stdin;
+                }
             }
         };
+
+        const output = {
+            stdOut: stdOutWriter,
+            stdErr: stdErrWriter,
+            readStdIn: async () => (stdinReader ? await stdinReader.readAll() : stdin),
+            stdInStream: stdinReader ? stdinReader.getStream() : staticStream
+        };
+
+        Object.defineProperty(output, "stdIn", {
+            enumerable: true,
+            get: () => (stdinReader ? stdinReader.getBufferedText() : stdin)
+        });
+
+        return output;
     }
 
     /**
@@ -610,6 +785,193 @@ class Terminal {
     }
 
     /**
+     * Parse pipelines while respecting simple quoting rules
+     * @param {string} inputLine - Raw input line
+     * @returns {string[]} Pipeline segments
+     */
+    parsePipeline(inputLine = "") {
+        const segments = [];
+        let current = "";
+        let inSingle = false;
+        let inDouble = false;
+
+        for (let i = 0; i < inputLine.length; i++) {
+            const ch = inputLine[i];
+
+            if (ch === "'" && !inDouble) {
+                inSingle = !inSingle;
+                current += ch;
+                continue;
+            }
+
+            if (ch === '"' && !inSingle) {
+                inDouble = !inDouble;
+                current += ch;
+                continue;
+            }
+
+            if (!inSingle && !inDouble && ch === "|") {
+                segments.push(current.trim());
+                current = "";
+                continue;
+            }
+
+            current += ch;
+        }
+
+        segments.push(current.trim());
+        return segments;
+    }
+
+    /**
+     * Execute one command line without echoing the prompt
+     * @param {string} inputLine - Command input
+     * @returns {Promise<number>} Exit code
+     */
+    async executeSingleCommand(inputLine, {
+        stdin = "",
+        stdinReader = null,
+        captureOutput = false,
+        onStdOut = undefined,
+        onStdErr = undefined
+    } = {}) {
+        const expandedInput = this.expandVariables(inputLine);
+        const parts = expandedInput.trim().split(/\s+/).filter(Boolean);
+        let stdOutBuffer = "";
+        let stdErrBuffer = "";
+
+        const stdOutWriter = (text) => {
+            if (captureOutput) {
+                stdOutBuffer += text;
+            }
+
+            if (typeof onStdOut === "function") {
+                onStdOut(text);
+                return;
+            }
+
+            if (!captureOutput) {
+                this.output += text;
+                this.renderer.renderOutput(this.output);
+            }
+        };
+
+        const stdErrWriter = (text) => {
+            if (captureOutput) {
+                stdErrBuffer += text;
+            }
+
+            if (typeof onStdErr === "function") {
+                onStdErr(text);
+                return;
+            }
+
+            if (!captureOutput) {
+                this.output += text;
+                this.renderer.renderOutput(this.output);
+            }
+        };
+
+        while (parts.length > 0) {
+            const assignment = this.parseAssignmentToken(parts[0]);
+            if (!assignment) {
+                break;
+            }
+
+            this.variables[assignment.name] = assignment.value;
+            parts.shift();
+        }
+
+        if (parts.length === 0) {
+            return { exitCode: 0, stdout: stdOutBuffer, stderr: stdErrBuffer };
+        }
+
+        const commandName = parts.shift();
+        if (this.commandExists(commandName)) {
+            const command = this.getCommand(commandName);
+            const exitCode = await command.execute(this.createCommandOutput({
+                stdin,
+                stdinReader,
+                onStdOut: stdOutWriter,
+                onStdErr: stdErrWriter
+            }), ...parts);
+            return { exitCode, stdout: stdOutBuffer, stderr: stdErrBuffer };
+        }
+
+        const errorText = `${commandName}: command not found\n`;
+        stdErrWriter(errorText);
+
+        return { exitCode: 127, stdout: stdOutBuffer, stderr: stdErrBuffer };
+    }
+
+    /**
+     * Execute a full pipeline and flush only final stdout to terminal output
+     * @param {string[]} segments - Pipeline command segments
+     * @returns {Promise<number>} Exit code of last pipeline stage
+     */
+    async executePipeline(segments, { stdin = "", captureOutput = false } = {}) {
+        const stageCount = segments.length;
+        const channels = [];
+        for (let i = 0; i < stageCount - 1; i++) {
+            channels.push(new TextChannel());
+        }
+
+        let finalStdout = "";
+        let combinedStderr = "";
+
+        const finalStdOutWriter = (text) => {
+            if (captureOutput) {
+                finalStdout += text;
+                return;
+            }
+
+            this.output += text;
+            this.renderer.renderOutput(this.output);
+        };
+
+        const stdErrWriter = (text) => {
+            if (captureOutput) {
+                combinedStderr += text;
+                return;
+            }
+
+            this.output += text;
+            this.renderer.renderOutput(this.output);
+        };
+
+        const stagePromises = segments.map((segment, index) => {
+            const stdinChannel = index > 0 ? channels[index - 1] : null;
+            const stdoutChannel = index < stageCount - 1 ? channels[index] : null;
+
+            const stageStdOutWriter = stdoutChannel
+                ? (text) => stdoutChannel.write(text)
+                : finalStdOutWriter;
+
+            const stagePromise = this.executeSingleCommand(segment, {
+                stdin: index === 0 ? stdin : "",
+                stdinReader: stdinChannel,
+                onStdOut: stageStdOutWriter,
+                onStdErr: stdErrWriter,
+                captureOutput
+            });
+
+            return stagePromise.finally(() => {
+                if (stdoutChannel) {
+                    stdoutChannel.close();
+                }
+            });
+        });
+
+        const results = await Promise.all(stagePromises);
+        const lastResult = results[results.length - 1];
+        return {
+            exitCode: lastResult.exitCode,
+            stdout: finalStdout,
+            stderr: combinedStderr
+        };
+    }
+
+    /**
      * Execute the current input as a command
      */
     async runCommandLine(inputLine, echoPrompt = true) {
@@ -625,38 +987,25 @@ class Terminal {
             this.renderer.renderOutput(this.output);
         }
 
-        // Parse command and arguments
-        const expandedInput = this.expandVariables(inputLine);
-        const parts = expandedInput.trim().split(/\s+/).filter(Boolean);
-
-        // Process leading NAME=value assignments
-        while (parts.length > 0) {
-            const assignment = this.parseAssignmentToken(parts[0]);
-            if (!assignment) {
-                break;
-            }
-
-            this.variables[assignment.name] = assignment.value;
-            parts.shift();
-        }
-
-        // Assignment-only input succeeds without running a command
-        if (parts.length === 0) {
-            this.lastExitCode = 0;
-            return;
-        }
-
-        const commandName = parts.shift();
-
         try {
-            if (this.commandExists(commandName)) {
-                const command = this.getCommand(commandName);
-                this.lastExitCode = await command.execute(this.createCommandOutput(), ...parts);
-            } else {
-                this.output += `${commandName}: command not found\n`;
-                this.lastExitCode = 127;
+            const pipelineSegments = this.parsePipeline(inputLine);
+            const hasPipeline = pipelineSegments.length > 1;
+
+            if (pipelineSegments.some((segment) => segment.length === 0)) {
+                this.output += "Syntax error near unexpected token '|'\n";
                 this.renderer.renderOutput(this.output);
+                this.lastExitCode = 2;
+                return;
             }
+
+            if (hasPipeline) {
+                const result = await this.executePipeline(pipelineSegments);
+                this.lastExitCode = result.exitCode;
+                return;
+            }
+
+            const result = await this.executeSingleCommand(inputLine);
+            this.lastExitCode = result.exitCode;
         } catch (error) {
             console.error('Command execution error:', error);
             this.output += `Error: ${error.message}\n`;
@@ -829,16 +1178,29 @@ class Terminal {
                 cmd.stdErr(`Error: ${error.message}\n`);
                 return 1;
             }
-                }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
+        }).withSummary("Prints help page. Use 'help <command>' to display help for a command")
                     .withHelp("Shows all user-facing commands or detailed help for a specific command.\nUse -i or --internal to include internal commands in the list.\n\nUsage: help [-i|--internal] [command]"));
 
         this.withCommand("echo", new Command(async (cmd, ...args) => {
             const suppressNewline = args[0] === "-n";
-            const output = suppressNewline ? args.slice(1).join(' ') : args.join(' ');
+            const textArgs = suppressNewline ? args.slice(1) : args;
+            const output = textArgs.join(' ');
             cmd.stdOut(output + (suppressNewline ? '' : "\n"));
             return 0;
         }).withSummary("Displays a line of text")
             .withHelp("Prints its arguments to standard output.\n\nUsage: echo [-n] [text ...]")
+            .markInternal());
+
+        this.withCommand("cat", new Command(async (cmd, ...args) => {
+            if (args.length > 0) {
+                cmd.stdErr("cat: file arguments are not supported in this terminal\n");
+                return 1;
+            }
+
+            cmd.stdOut(await cmd.readStdIn());
+            return 0;
+        }).withSummary("Passes stdin through to stdout")
+            .withHelp("Writes piped stdin to standard output.\n\nUsage: cat")
             .markInternal());
 
         this.withCommand("date", new Command(async (cmd, ...args) => {
@@ -848,13 +1210,6 @@ class Terminal {
             return 0;
         }).withSummary("Displays the current date and time")
             .withHelp("Prints the current date and time.\n\nUsage: date [-u|--utc]")
-            .markInternal());
-
-        this.withCommand("whoami", new Command(async (cmd) => {
-            cmd.stdOut("lee\n");
-            return 0;
-        }).withSummary("Displays the current user")
-            .withHelp("Prints the current username.\n\nUsage: whoami")
             .markInternal());
 
         this.withCommand("uname", new Command(async (cmd, ...args) => {
@@ -895,22 +1250,22 @@ class Terminal {
             .markInternal());
 
         this.withCommand("set", new Command(async (cmd) => {
-                const variableNames = Object.keys(this.variables).sort();
-                const output = variableNames.map((name) => `${name}=${this.variables[name]}`).join("\n");
-                cmd.stdOut((output ? output + "\n" : ""));
-                return 0;
+            const variableNames = Object.keys(this.variables).sort();
+            const output = variableNames.map((name) => `${name}=${this.variables[name]}`).join("\n");
+            cmd.stdOut((output ? output + "\n" : ""));
+            return 0;
         }).withSummary("Displays shell variables")
             .withHelp("Prints all shell variables.\n\nUsage: set")
             .markInternal());
 
         this.withCommand("unset", new Command(async (cmd, ...args) => {
                 if (args.length === 0) {
-                        cmd.stdErr("Usage: unset <name> [name ...]\n");
-                        return 1;
+                    cmd.stdErr("Usage: unset <name> [name ...]\n");
+                    return 1;
                 }
 
                 for (const name of args) {
-                        delete this.variables[name];
+                    delete this.variables[name];
                 }
 
                 return 0;
@@ -935,6 +1290,40 @@ class Terminal {
             }
         }).withSummary("Shows previously entered commands")
             .withHelp("Displays command history in chronological order.\nUse -c to clear the history.\n\nUsage: history [-c]")
+            .markInternal());
+
+        this.withCommand("time", new Command(async (cmd, ...args) => {
+            if (args.length === 0) {
+                cmd.stdErr("Usage: time <command> [args ...]\n");
+                return 1;
+            }
+
+            const nestedLine = args.join(" ");
+            const start = (typeof performance !== "undefined" && typeof performance.now === "function")
+                ? performance.now()
+                : Date.now();
+            const pipelineSegments = this.parsePipeline(nestedLine);
+            const stdinText = await cmd.readStdIn();
+            const result = pipelineSegments.length > 1
+                ? await this.executePipeline(pipelineSegments, { stdin: stdinText, captureOutput: true })
+                : await this.executeSingleCommand(nestedLine, { stdin: stdinText, captureOutput: true });
+            const end = (typeof performance !== "undefined" && typeof performance.now === "function")
+                ? performance.now()
+                : Date.now();
+            const elapsedSeconds = (end - start) / 1000;
+
+            if (result.stderr) {
+                cmd.stdErr(result.stderr);
+            }
+
+            if (result.stdout) {
+                cmd.stdOut(result.stdout);
+            }
+
+            cmd.stdOut(`real ${elapsedSeconds.toFixed(3)}s\n`);
+            return result.exitCode;
+        }).withSummary("Times command execution")
+            .withHelp("Executes a command and prints elapsed wall-clock time.\n\nUsage: time <command> [args ...]")
             .markInternal());
 
         this.withCommand("clear", new Command(async () => {

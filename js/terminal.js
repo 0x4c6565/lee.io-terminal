@@ -130,7 +130,7 @@ class InputBuffer {
     }
 
     /**
-     * Delete word before cursor (Ctrl+W)
+     * Delete word before cursor (Ctrl+Backspace/Alt+Backspace)
      */
     deleteWordBeforeCursor() {
         if (this.cursorX === 0) return;
@@ -148,7 +148,7 @@ class InputBuffer {
     }
 
     /**
-     * Delete word after cursor (Alt+D/Ctrl+Delete)
+     * Delete word after cursor (Ctrl+Delete/Alt+Delete)
      */
     deleteWordAfterCursor() {
         if (this.cursorX >= this.buffer.length) return;
@@ -288,8 +288,8 @@ class KeyboardHandler {
     async handleKeyDown(e) {
         try {
             const isCopyShortcut = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c";
-            const isDeleteWordBefore = e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "w";
-            const isDeleteWordAfter = (e.altKey && e.key.toLowerCase() === "d") || (e.ctrlKey && !e.metaKey && e.key === "Delete");
+            const isDeleteWordBefore = ((!e.metaKey && e.ctrlKey && e.key === "Backspace") || (!e.metaKey && e.altKey && e.key === "Backspace"));
+            const isDeleteWordAfter = ((!e.metaKey && e.ctrlKey && e.key === "Delete") || (!e.metaKey && e.altKey && e.key === "Delete"));
 
             // Let browser paste shortcuts flow to the paste event handler.
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
